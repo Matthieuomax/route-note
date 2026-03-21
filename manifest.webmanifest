@@ -1,0 +1,526 @@
+class LocalStorageDB {
+  static getUsers() {
+    return JSON.parse(localStorage.getItem('users') || '{}');
+  }
+  static saveUsers(users) {
+    localStorage.setItem('users', JSON.stringify(users));
+  }
+  static createUser(username, password) {
+    const users = this.getUsers();
+    if (users[username]) throw new Error('Cet identifiant existe déjà');
+    users[username] = {
+      password: btoa(password),
+      createdAt: new Date().toISOString()
+    };
+    this.saveUsers(users);
+  }
+  static verifyUser(username, password) {
+    const users = this.getUsers();
+    const user = users[username];
+    if (!user || user.password !== btoa(password)) {
+      throw new Error('Identifiant ou mot de passe incorrect');
+    }
+    return { username };
+  }
+  static getDeliveries(username) {
+    return JSON.parse(localStorage.getItem('deliveries_' + username) || '[]');
+  }
+  static saveDeliveries(username, deliveries) {
+    localStorage.setItem('deliveries_' + username, JSON.stringify(deliveries));
+  }
+  static getSettings(username) {
+    return JSON.parse(
+      localStorage.getItem('settings_' + username) ||
+      JSON.stringify({ ratePerKm: 0.5, vehicleInfo: '', theme: 'blue' })
+    );
+  }
+  static saveSettings(username, settings) {
+    localStorage.setItem('settings_' + username, JSON.stringify(settings));
+  }
+  static getActiveTrip(username) {
+    return JSON.parse(localStorage.getItem('activeTrip_' + username) || 'null');
+  }
+  static saveActiveTrip(username, trip) {
+    localStorage.setItem('activeTrip_' + username, JSON.stringify(trip));
+  }
+  static clearActiveTrip(username) {
+    localStorage.removeItem('activeTrip_' + username);
+  }
+}
+
+let currentUser = null;
+let deliveries = [];
+let userSettings = { ratePerKm: 0.5, vehicleInfo: '', theme: 'blue' };
+let activeTrip = null;
+let geoWatchId = null;
+let deferredPrompt = null;
+let tripTimer = null;
+
+const authPage = document.getElementById('authPage');
+const appPage = document.getElementById('appPage');
+const authError = document.getElementById('authError');
+const authSuccess = document.getElementById('authSuccess');
+
+function formatDate(dateString) {
+  return new Date(dateString).toLocaleDateString('fr-FR', {
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
+  });
+}
+function formatTime(iso) {
+  if (!iso) return '--:--';
+  return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+function formatDuration(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = String(Math.floor(total / 3600)).padStart(2, '0');
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+  const s = String(total % 60).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+function toRad(v) { return v * Math.PI / 180; }
+function haversineKm(a, b) {
+  const R = 6371;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lng - a.lng);
+  const q1 = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) *
+    Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(q1));
+}
+
+function showError(message) {
+  authError.textContent = message;
+  authError.classList.remove('hidden');
+}
+function showSuccess(message) {
+  authSuccess.textContent = message;
+  authSuccess.classList.remove('hidden');
+  setTimeout(() => authSuccess.classList.add('hidden'), 3000);
+}
+function hideMessages() {
+  authError.classList.add('hidden');
+  authSuccess.classList.add('hidden');
+}
+
+function loadUserData() {
+  deliveries = LocalStorageDB.getDeliveries(currentUser.username);
+  userSettings = LocalStorageDB.getSettings(currentUser.username);
+  activeTrip = LocalStorageDB.getActiveTrip(currentUser.username);
+}
+function saveSettings() {
+  LocalStorageDB.saveSettings(currentUser.username, userSettings);
+}
+
+function updateStats() {
+  const totalKm = deliveries.reduce((s, d) => s + (Number(d.distance) || 0), 0);
+  const totalPayment = deliveries.reduce((s, d) => s + (Number(d.payment) || 0), 0);
+  const avgKm = deliveries.length ? totalKm / deliveries.length : 0;
+  document.getElementById('totalKm').textContent = totalKm.toFixed(2);
+  document.getElementById('totalPayment').textContent = totalPayment.toFixed(2) + ' €';
+  document.getElementById('totalDeliveries').textContent = deliveries.length;
+  document.getElementById('avgKm').textContent = avgKm.toFixed(2) + ' km';
+}
+
+function renderDeliveries() {
+  const box = document.getElementById('deliveriesList');
+  if (!deliveries.length) {
+    box.innerHTML = '<div class="delivery-card"><div style="text-align:center;color:#6b7280;">Aucune livraison enregistrée.</div></div>';
+    return;
+  }
+
+  box.innerHTML = deliveries.map(d => `
+    <div class="delivery-card">
+      <div class="delivery-top">
+        <div>
+          <div style="font-size:18px;font-weight:700;">📦 ${escapeHtml(d.clientName || 'Sans nom')}</div>
+          <div class="small">${formatDate(d.date)} · ${d.mode === 'gps-auto' ? 'Mode auto GPS' : 'Mode manuel'}</div>
+        </div>
+        <div class="pill">${(d.payment || 0).toFixed(2)} €</div>
+      </div>
+      <div class="delivery-details">
+        <div>Heure: ${d.startTime || '--:--'} → ${d.endTime || '--:--'}</div>
+        <div>Distance: ${(d.distance || 0).toFixed(2)} km</div>
+        <div>Kilométrage: ${Number(d.startKm || 0).toFixed(2)} → ${Number(d.endKm || 0).toFixed(2)}</div>
+        <div>Tarif: ${(d.ratePerKm || 0).toFixed(2)} €/km</div>
+      </div>
+      ${d.notes ? `<div style="margin-top:12px;background:#f9fafb;border-radius:12px;padding:12px;font-size:14px;">${escapeHtml(d.notes)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+function updateTripUI() {
+  const badge = document.getElementById('tripStatusBadge');
+  if (activeTrip) {
+    badge.textContent = 'Trajet en cours';
+    badge.className = 'status-badge status-running';
+    document.getElementById('activeClientLabel').textContent = activeTrip.clientName || '—';
+    document.getElementById('tripStartDisplay').textContent = formatTime(activeTrip.startAt);
+    document.getElementById('tripEndDisplay').textContent = '--:--';
+    document.getElementById('tripDistanceDisplay').textContent = (activeTrip.distanceKm || 0).toFixed(2) + ' km';
+    startTripTimer();
+  } else {
+    badge.textContent = 'Aucun trajet en cours';
+    badge.className = 'status-badge status-idle';
+    document.getElementById('activeClientLabel').textContent = '—';
+    document.getElementById('tripStartDisplay').textContent = '--:--';
+    document.getElementById('tripEndDisplay').textContent = '--:--';
+    document.getElementById('tripDistanceDisplay').textContent = '0.00 km';
+    document.getElementById('tripDurationDisplay').textContent = '00:00:00';
+    stopTripTimer();
+  }
+}
+
+function startTripTimer() {
+  stopTripTimer();
+  tripTimer = setInterval(() => {
+    if (activeTrip?.startAt) {
+      document.getElementById('tripDurationDisplay').textContent =
+        formatDuration(Date.now() - new Date(activeTrip.startAt).getTime());
+    }
+  }, 1000);
+}
+
+function stopTripTimer() {
+  if (tripTimer) {
+    clearInterval(tripTimer);
+    tripTimer = null;
+  }
+}
+
+function updateUI() {
+  document.getElementById('userName').textContent = currentUser.username;
+  document.getElementById('currentDate').textContent = new Date().toLocaleDateString('fr-FR', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  document.getElementById('deliveryDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('settingsRate').value = userSettings.ratePerKm;
+  document.getElementById('settingsVehicle').value = userSettings.vehicleInfo || '';
+  document.body.className = 'theme-' + (userSettings.theme || 'blue');
+  document.querySelectorAll('.theme-option').forEach(opt => {
+    opt.classList.toggle('active', opt.dataset.theme === userSettings.theme);
+  });
+  updateStats();
+  renderDeliveries();
+  updateTripUI();
+}
+
+function startGeoTracking() {
+  if (!navigator.geolocation) {
+    document.getElementById('geoMessage').textContent = 'Géolocalisation non disponible sur cet appareil.';
+    return;
+  }
+
+  if (geoWatchId !== null) navigator.geolocation.clearWatch(geoWatchId);
+
+  geoWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      if (!activeTrip) return;
+
+      const point = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+        ts: Date.now()
+      };
+
+      const points = activeTrip.points || [];
+      const last = points[points.length - 1];
+      let distance = Number(activeTrip.distanceKm || 0);
+
+      if (last) {
+        const step = haversineKm(
+          { lat: last.lat, lng: last.lng },
+          { lat: point.lat, lng: point.lng }
+        );
+        if (step > 0.003 && step < 3 && point.accuracy <= 100) {
+          distance += step;
+        }
+      }
+
+      points.push(point);
+      activeTrip.points = points;
+      activeTrip.distanceKm = distance;
+      activeTrip.lastPosition = point;
+
+      LocalStorageDB.saveActiveTrip(currentUser.username, activeTrip);
+      document.getElementById('tripDistanceDisplay').textContent = distance.toFixed(2) + ' km';
+      document.getElementById('geoMessage').textContent = `GPS actif · précision ${Math.round(point.accuracy)} m`;
+    },
+    err => {
+      document.getElementById('geoMessage').textContent = 'Erreur GPS : ' + err.message;
+    },
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
+  );
+}
+
+function stopGeoTracking() {
+  if (geoWatchId !== null) {
+    navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+  }
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, s => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[s]));
+}
+
+document.getElementById('switchToRegister').addEventListener('click', () => {
+  const username = prompt('Choisissez un identifiant :');
+  if (!username) return;
+  const password = prompt('Choisissez un mot de passe :');
+  if (!password || password.length < 4) {
+    showError('Mot de passe trop court');
+    return;
+  }
+  try {
+    LocalStorageDB.createUser(username.trim(), password);
+    showSuccess('Compte créé avec succès.');
+  } catch (e) {
+    showError(e.message);
+  }
+});
+
+document.getElementById('loginForm').addEventListener('submit', e => {
+  e.preventDefault();
+  hideMessages();
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  try {
+    currentUser = LocalStorageDB.verifyUser(username, password);
+    localStorage.setItem('currentUser', JSON.stringify(currentUser));
+    loadUserData();
+    showApp();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+function showApp() {
+  authPage.classList.add('hidden');
+  appPage.classList.remove('hidden');
+  updateUI();
+  if (activeTrip) startGeoTracking();
+}
+
+function showAuth() {
+  authPage.classList.remove('hidden');
+  appPage.classList.add('hidden');
+  stopGeoTracking();
+  stopTripTimer();
+}
+
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  localStorage.removeItem('currentUser');
+  currentUser = null;
+  showAuth();
+});
+
+document.getElementById('fabBtn').addEventListener('click', () => {
+  document.getElementById('deliveryFormContainer').classList.remove('hidden');
+  document.getElementById('fabBtn').classList.add('hidden');
+  if (deliveries.length && deliveries[0].endKm != null) {
+    document.getElementById('deliveryStartKm').value = deliveries[0].endKm;
+  }
+  calculateManual();
+});
+
+document.getElementById('cancelDeliveryBtn').addEventListener('click', () => {
+  document.getElementById('deliveryFormContainer').classList.add('hidden');
+  document.getElementById('fabBtn').classList.remove('hidden');
+  document.getElementById('deliveryForm').reset();
+  document.getElementById('deliveryDate').value = new Date().toISOString().split('T')[0];
+});
+
+document.getElementById('deliveryStartKm').addEventListener('input', calculateManual);
+document.getElementById('deliveryEndKm').addEventListener('input', calculateManual);
+
+function calculateManual() {
+  const s = parseFloat(document.getElementById('deliveryStartKm').value) || 0;
+  const e = parseFloat(document.getElementById('deliveryEndKm').value) || 0;
+  const d = Math.max(0, e - s);
+  document.getElementById('calcDistance').textContent = d.toFixed(2) + ' km';
+  document.getElementById('calcPayment').textContent = (d * userSettings.ratePerKm).toFixed(2) + ' €';
+}
+
+document.getElementById('deliveryForm').addEventListener('submit', e => {
+  e.preventDefault();
+
+  const startKm = parseFloat(document.getElementById('deliveryStartKm').value);
+  const endKm = parseFloat(document.getElementById('deliveryEndKm').value);
+  const distance = endKm - startKm;
+
+  if (!document.getElementById('deliveryClient').value.trim()) {
+    alert('Veuillez entrer le nom du client');
+    return;
+  }
+  if (!(distance > 0)) {
+    alert("Le km d'arrivée doit être supérieur au km de départ");
+    return;
+  }
+
+  const delivery = {
+    id: Date.now(),
+    mode: 'manual',
+    date: document.getElementById('deliveryDate').value,
+    clientName: document.getElementById('deliveryClient').value.trim(),
+    startTime: document.getElementById('deliveryStartTime').value,
+    endTime: document.getElementById('deliveryEndTime').value,
+    startKm,
+    endKm,
+    distance,
+    payment: distance * userSettings.ratePerKm,
+    ratePerKm: userSettings.ratePerKm,
+    notes: document.getElementById('deliveryNotes').value.trim(),
+    createdAt: new Date().toISOString()
+  };
+
+  deliveries.unshift(delivery);
+  LocalStorageDB.saveDeliveries(currentUser.username, deliveries);
+  updateUI();
+
+  document.getElementById('deliveryFormContainer').classList.add('hidden');
+  document.getElementById('fabBtn').classList.remove('hidden');
+  document.getElementById('deliveryForm').reset();
+  alert('Livraison enregistrée');
+});
+
+document.getElementById('startTripBtn').addEventListener('click', () => {
+  const clientName = document.getElementById('quickClientName').value.trim();
+  if (!clientName) {
+    alert('Entrez le nom du client avant de démarrer');
+    return;
+  }
+  if (activeTrip) {
+    alert('Un trajet est déjà en cours');
+    return;
+  }
+
+  const now = new Date();
+  activeTrip = {
+    id: Date.now(),
+    clientName,
+    startAt: now.toISOString(),
+    date: now.toISOString().split('T')[0],
+    startTime: now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+    endTime: null,
+    startKm: deliveries.length && deliveries[0].endKm != null ? deliveries[0].endKm : 0,
+    endKm: null,
+    distanceKm: 0,
+    ratePerKm: userSettings.ratePerKm,
+    points: [],
+    mode: 'gps-auto',
+    notes: ''
+  };
+
+  LocalStorageDB.saveActiveTrip(currentUser.username, activeTrip);
+  updateTripUI();
+  startGeoTracking();
+});
+
+document.getElementById('stopTripBtn').addEventListener('click', () => {
+  if (!activeTrip) {
+    alert('Aucun trajet en cours');
+    return;
+  }
+
+  const end = new Date();
+  activeTrip.endAt = end.toISOString();
+  activeTrip.endTime = end.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const distance = Number(activeTrip.distanceKm || 0);
+  const finalDelivery = {
+    id: activeTrip.id,
+    mode: 'gps-auto',
+    date: activeTrip.date,
+    clientName: activeTrip.clientName,
+    startTime: activeTrip.startTime,
+    endTime: activeTrip.endTime,
+    startKm: Number(activeTrip.startKm || 0),
+    endKm: Number(activeTrip.startKm || 0) + distance,
+    distance,
+    payment: distance * userSettings.ratePerKm,
+    ratePerKm: userSettings.ratePerKm,
+    notes: `Trajet GPS automatique · départ ${activeTrip.startAt} · arrêt ${activeTrip.endAt}`,
+    createdAt: new Date().toISOString(),
+    gpsTrack: activeTrip.points || []
+  };
+
+  deliveries.unshift(finalDelivery);
+  LocalStorageDB.saveDeliveries(currentUser.username, deliveries);
+  LocalStorageDB.clearActiveTrip(currentUser.username);
+  activeTrip = null;
+  stopGeoTracking();
+  document.getElementById('quickClientName').value = '';
+  updateUI();
+  alert('Trajet automatique enregistré');
+});
+
+document.getElementById('settingsRate').addEventListener('change', e => {
+  userSettings.ratePerKm = parseFloat(e.target.value) || 0;
+  saveSettings();
+  updateUI();
+});
+document.getElementById('settingsVehicle').addEventListener('change', e => {
+  userSettings.vehicleInfo = e.target.value;
+  saveSettings();
+});
+
+document.querySelectorAll('.theme-option').forEach(opt => opt.addEventListener('click', () => {
+  userSettings.theme = opt.dataset.theme;
+  saveSettings();
+  updateUI();
+}));
+
+document.querySelectorAll('.nav-item').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
+  btn.classList.add('active');
+  const view = btn.dataset.view;
+  document.getElementById('dashboardView').classList.toggle('hidden', view !== 'dashboard');
+  document.getElementById('settingsView').classList.toggle('hidden', view !== 'settings');
+  document.getElementById('fabBtn').classList.toggle('hidden', view !== 'dashboard');
+}));
+
+document.getElementById('btnExportJson').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify({
+    user: currentUser.username,
+    settings: userSettings,
+    deliveries
+  }, null, 2)], { type: 'application/json' });
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `route-note-${currentUser.username}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById('installBtn').textContent = "Installer l'application";
+});
+
+document.getElementById('installBtn').addEventListener('click', async () => {
+  if (!deferredPrompt) {
+    alert("Installation disponible quand le site est servi avec manifest + service worker.");
+    return;
+  }
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+});
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(console.error);
+  });
+}
+
+const savedUser = localStorage.getItem('currentUser');
+if (savedUser) {
+  currentUser = JSON.parse(savedUser);
+  loadUserData();
+  showApp();
+}
