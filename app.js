@@ -313,9 +313,39 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
         } else {
             document.getElementById('deliveryForm').classList.add('hidden');
             document.getElementById('autoModeContainer').classList.remove('hidden');
+            
+            // Demander permission GPS dès le passage en mode automatique
+            requestGPSPermission();
         }
     });
 });
+
+// ===== DEMANDE PERMISSION GPS =====
+function requestGPSPermission() {
+    if (!navigator.geolocation) {
+        console.warn('Géolocalisation non supportée');
+        return;
+    }
+    
+    // Demande silencieuse de permission
+    navigator.geolocation.getCurrentPosition(
+        () => {
+            console.log('✅ Permission GPS accordée');
+        },
+        (error) => {
+            if (error.code === error.PERMISSION_DENIED) {
+                // Afficher un message uniquement si refusé
+                setTimeout(() => {
+                    if (confirm('📍 La géolocalisation est nécessaire pour le mode automatique.\n\nAutorisez l\'accès dans les paramètres de votre navigateur.')) {
+                        // Sur iOS, proposer d'ouvrir les réglages
+                        console.log('Veuillez activer la localisation dans les paramètres');
+                    }
+                }, 500);
+            }
+        },
+        { enableHighAccuracy: false, timeout: 5000 }
+    );
+}
 
 // ===== CALCUL MANUEL =====
 document.getElementById('deliveryStartKm').addEventListener('input', calculateDelivery);
@@ -456,10 +486,15 @@ function startGPSTrip() {
                 }
             );
             
-            alert('✅ Trajet démarré ! GPS activé');
+            // Feedback visuel (pas d'alert)
+            console.log('✅ Trajet démarré ! GPS activé');
         },
         (error) => {
-            alert('❌ Impossible d\'accéder au GPS : ' + error.message);
+            // Afficher erreur uniquement si vraiment nécessaire
+            console.error('Erreur GPS:', error);
+            if (error.code === error.PERMISSION_DENIED) {
+                alert('❌ Permission GPS refusée.\nActivez la localisation dans les paramètres de votre appareil.');
+            }
         }
     );
 }
@@ -540,9 +575,22 @@ function stopGPSTrip() {
     document.getElementById('deliveryFormContainer').classList.add('hidden');
     document.getElementById('fabBtn').classList.remove('hidden');
     
-    alert(`✅ Livraison GPS enregistrée !
-Distance : ${tripData.distance.toFixed(2)} km
-Paiement : ${payment.toFixed(2)} €`);
+    // Notification discrète de succès
+    const successMsg = document.createElement('div');
+    successMsg.style.cssText = `
+        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+        background: linear-gradient(135deg, #10b981, #059669); color: white;
+        padding: 16px 24px; border-radius: 12px; font-weight: 600;
+        box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4); z-index: 9999;
+        animation: slideDown 0.3s ease-out;
+    `;
+    successMsg.innerHTML = `✅ Livraison GPS enregistrée !<br><small>${tripData.distance.toFixed(2)} km • ${payment.toFixed(2)} €</small>`;
+    document.body.appendChild(successMsg);
+    
+    setTimeout(() => {
+        successMsg.style.animation = 'slideUp 0.3s ease-out';
+        setTimeout(() => successMsg.remove(), 300);
+    }, 3000);
 }
 
 // ===== RESET TRAJET =====
@@ -648,6 +696,7 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         return;
     }
 
+    // Données
     const data = [
         ['ROUTE NOTE - ' + currentUser.username.toUpperCase()],
         ['Généré le : ' + new Date().toLocaleString('fr-FR')],
@@ -677,17 +726,106 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), '', totalPayment.toFixed(2), '']);
     data.push(['']);
     data.push(['STATISTIQUES']);
-    data.push(['Livraisons', deliveries.length]);
+    data.push(['Nombre de livraisons', deliveries.length]);
     data.push(['Distance totale', totalKm.toFixed(0) + ' km']);
     data.push(['Paiement total', totalPayment.toFixed(2) + ' €']);
-    data.push(['Moyenne', (totalKm / deliveries.length).toFixed(0) + ' km']);
+    data.push(['Moyenne par livraison', (totalKm / deliveries.length).toFixed(0) + ' km']);
 
     const ws = XLSX.utils.aoa_to_sheet(data);
     
+    // Largeur colonnes
     ws['!cols'] = [
-        { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 12 },
-        { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 },
-        { wch: 14 }, { wch: 30 }
+        { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 10 },
+        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+        { wch: 14 }, { wch: 35 }
+    ];
+
+    // STYLES PROFESSIONNELS
+    const headerStyle = {
+        font: { bold: true, color: { rgb: "FFFFFF" }, size: 12 },
+        fill: { fgColor: { rgb: "2563EB" } },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: {
+            top: { style: "thin", color: { rgb: "000000" } },
+            bottom: { style: "thin", color: { rgb: "000000" } },
+            left: { style: "thin", color: { rgb: "000000" } },
+            right: { style: "thin", color: { rgb: "000000" } }
+        }
+    };
+
+    const titleStyle = {
+        font: { bold: true, size: 16, color: { rgb: "2563EB" } },
+        alignment: { horizontal: "center" }
+    };
+
+    const subtitleStyle = {
+        font: { italic: true, size: 10, color: { rgb: "6B7280" } },
+        alignment: { horizontal: "center" }
+    };
+
+    const totalStyle = {
+        font: { bold: true, size: 12 },
+        fill: { fgColor: { rgb: "FEF3C7" } },
+        alignment: { horizontal: "right" }
+    };
+
+    const dataStyle = {
+        alignment: { horizontal: "center", vertical: "center" },
+        border: {
+            top: { style: "thin", color: { rgb: "E5E7EB" } },
+            bottom: { style: "thin", color: { rgb: "E5E7EB" } },
+            left: { style: "thin", color: { rgb: "E5E7EB" } },
+            right: { style: "thin", color: { rgb: "E5E7EB" } }
+        }
+    };
+
+    const statsHeaderStyle = {
+        font: { bold: true, size: 12, color: { rgb: "FFFFFF" } },
+        fill: { fgColor: { rgb: "10B981" } },
+        alignment: { horizontal: "center" }
+    };
+
+    // Appliquer styles
+    // Titre
+    if (ws['A1']) ws['A1'].s = titleStyle;
+    // Sous-titre
+    if (ws['A2']) ws['A2'].s = subtitleStyle;
+    
+    // En-têtes (ligne 4)
+    for (let col = 0; col < 10; col++) {
+        const cell = String.fromCharCode(65 + col) + '4';
+        if (ws[cell]) ws[cell].s = headerStyle;
+    }
+
+    // Données (lignes 5 à 4+deliveries.length)
+    for (let row = 5; row <= 4 + deliveries.length; row++) {
+        for (let col = 0; col < 10; col++) {
+            const cell = String.fromCharCode(65 + col) + row;
+            if (ws[cell]) {
+                ws[cell].s = dataStyle;
+                // Alterner couleurs lignes
+                if (row % 2 === 0) {
+                    ws[cell].s.fill = { fgColor: { rgb: "F9FAFB" } };
+                }
+            }
+        }
+    }
+
+    // Ligne TOTAUX
+    const totalRow = 4 + deliveries.length + 2;
+    for (let col = 0; col < 10; col++) {
+        const cell = String.fromCharCode(65 + col) + totalRow;
+        if (ws[cell]) ws[cell].s = totalStyle;
+    }
+
+    // Statistiques
+    const statsRow = totalRow + 2;
+    if (ws['A' + statsRow]) ws['A' + statsRow].s = statsHeaderStyle;
+
+    // Fusion cellules titre
+    ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }, // Titre
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } }  // Sous-titre
     ];
 
     const wb = XLSX.utils.book_new();
@@ -696,7 +834,17 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, filename);
 
-    alert('✅ Fichier Excel téléchargé !');
+    // Notification discrète
+    const successMsg = document.createElement('div');
+    successMsg.style.cssText = `
+        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+        background: linear-gradient(135deg, #10b981, #059669); color: white;
+        padding: 16px 24px; border-radius: 12px; font-weight: 600;
+        box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4); z-index: 9999;
+    `;
+    successMsg.textContent = '✅ Fichier Excel téléchargé !';
+    document.body.appendChild(successMsg);
+    setTimeout(() => successMsg.remove(), 3000);
 });
 
 // ===== NAVIGATION =====
