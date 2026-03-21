@@ -56,8 +56,10 @@ class LocalStorage {
     static getSettings(username) {
         const key = `settings_${username}`;
         const defaults = { 
-            ratePerKm: 0.50, 
-            vehicleInfo: '',
+            vehicleType: 'auto',
+            motorisation: 'thermique',
+            fiscalPower: 'cv4',
+            annualKm: 'tranche2',
             theme: 'blue'
         };
         return JSON.parse(localStorage.getItem(key) || JSON.stringify(defaults));
@@ -69,9 +71,145 @@ class LocalStorage {
     }
 }
 
+// ===== BARÈME KILOMÉTRIQUE 2025 =====
+const BAREME_KM = {
+    auto_thermique: {
+        cv3: {
+            tranche1: { max: 5000, calc: (d) => d * 0.529 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.316) + 1065 },
+            tranche3: { calc: (d) => d * 0.370 }
+        },
+        cv4: {
+            tranche1: { max: 5000, calc: (d) => d * 0.606 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.340) + 1330 },
+            tranche3: { calc: (d) => d * 0.407 }
+        },
+        cv5: {
+            tranche1: { max: 5000, calc: (d) => d * 0.636 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.357) + 1395 },
+            tranche3: { calc: (d) => d * 0.427 }
+        },
+        cv6: {
+            tranche1: { max: 5000, calc: (d) => d * 0.665 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.374) + 1457 },
+            tranche3: { calc: (d) => d * 0.447 }
+        },
+        cv7: {
+            tranche1: { max: 5000, calc: (d) => d * 0.697 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.394) + 1515 },
+            tranche3: { calc: (d) => d * 0.470 }
+        }
+    },
+    auto_electrique: {
+        cv3: {
+            tranche1: { max: 5000, calc: (d) => d * 0.635 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.379) + 1278 },
+            tranche3: { calc: (d) => d * 0.444 }
+        },
+        cv4: {
+            tranche1: { max: 5000, calc: (d) => d * 0.727 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.408) + 1596 },
+            tranche3: { calc: (d) => d * 0.488 }
+        },
+        cv5: {
+            tranche1: { max: 5000, calc: (d) => d * 0.763 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.428) + 1674 },
+            tranche3: { calc: (d) => d * 0.512 }
+        },
+        cv6: {
+            tranche1: { max: 5000, calc: (d) => d * 0.798 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.449) + 1748 },
+            tranche3: { calc: (d) => d * 0.536 }
+        },
+        cv7: {
+            tranche1: { max: 5000, calc: (d) => d * 0.836 },
+            tranche2: { max: 20000, calc: (d) => (d * 0.473) + 1818 },
+            tranche3: { calc: (d) => d * 0.564 }
+        }
+    },
+    moto_thermique: {
+        cv12: {
+            tranche1: { max: 3000, calc: (d) => d * 0.395 },
+            tranche2: { max: 6000, calc: (d) => (d * 0.099) + 891 },
+            tranche3: { calc: (d) => d * 0.248 }
+        },
+        cv345: {
+            tranche1: { max: 3000, calc: (d) => d * 0.468 },
+            tranche2: { max: 6000, calc: (d) => (d * 0.082) + 1158 },
+            tranche3: { calc: (d) => d * 0.275 }
+        },
+        cv5plus: {
+            tranche1: { max: 3000, calc: (d) => d * 0.606 },
+            tranche2: { max: 6000, calc: (d) => (d * 0.079) + 1583 },
+            tranche3: { calc: (d) => d * 0.343 }
+        }
+    },
+    moto_electrique: {
+        cv12: {
+            tranche1: { max: 3000, calc: (d) => d * 0.474 },
+            tranche2: { max: 6000, calc: (d) => (d * 0.119) + 1069 },
+            tranche3: { calc: (d) => d * 0.298 }
+        },
+        cv345: {
+            tranche1: { max: 3000, calc: (d) => d * 0.562 },
+            tranche2: { max: 6000, calc: (d) => (d * 0.098) + 1390 },
+            tranche3: { calc: (d) => d * 0.330 }
+        },
+        cv5plus: {
+            tranche1: { max: 3000, calc: (d) => d * 0.727 },
+            tranche2: { max: 6000, calc: (d) => (d * 0.095) + 1900 },
+            tranche3: { calc: (d) => d * 0.412 }
+        }
+    },
+    cyclo_thermique: {
+        unique: {
+            tranche1: { max: 3000, calc: (d) => d * 0.315 },
+            tranche2: { max: 6000, calc: (d) => (d * 0.079) + 711 },
+            tranche3: { calc: (d) => d * 0.198 }
+        }
+    },
+    cyclo_electrique: {
+        unique: {
+            tranche1: { max: 3000, calc: (d) => d * 0.378 },
+            tranche2: { max: 6000, calc: (d) => (d * 0.095) + 853 },
+            tranche3: { calc: (d) => d * 0.238 }
+        }
+    }
+};
+
+// ===== CALCUL INDEMNITÉ =====
+function calculateIndemnite(distance, vehicleType, motorisation, fiscalPower, annualKm) {
+    const key = `${vehicleType}_${motorisation}`;
+    const bareme = BAREME_KM[key];
+    
+    if (!bareme) return 0;
+    
+    // Déterminer la puissance fiscale
+    let powerKey = fiscalPower;
+    if (vehicleType === 'cyclo') {
+        powerKey = 'unique';
+    }
+    
+    const tranches = bareme[powerKey];
+    if (!tranches) return 0;
+    
+    // Sélectionner la bonne tranche selon kilométrage annuel
+    const tranche = tranches[annualKm];
+    if (!tranche) return 0;
+    
+    // Calculer le montant
+    return tranche.calc(distance);
+}
+
 // ===== VARIABLES GLOBALES =====
 let currentUser = null;
-let userSettings = { ratePerKm: 0.50, vehicleInfo: '', theme: 'blue' };
+let userSettings = { 
+    vehicleType: 'auto',
+    motorisation: 'thermique', 
+    fiscalPower: 'cv4',
+    annualKm: 'tranche2',
+    theme: 'blue'
+};
 let deliveries = [];
 
 // ===== GÉOLOCALISATION - Variables trajet GPS =====
@@ -210,24 +348,54 @@ function updateUI() {
     document.getElementById('avgKm').textContent = avgKm.toFixed(1) + ' km';
     document.getElementById('deliveryCount').textContent = deliveries.length + ' trajets';
 
-    document.getElementById('settingsRate').value = userSettings.ratePerKm || 0.50;
-    document.getElementById('settingsVehicle').value = userSettings.vehicleInfo || '';
-    document.getElementById('deliveryRate').value = userSettings.ratePerKm || 0.50;
-    document.getElementById('autoRate').value = userSettings.ratePerKm || 0.50;
-
-    updatePresetButtons();
+    // Mettre à jour l'interface des paramètres véhicule
+    updateVehicleSettings();
     renderDeliveries();
 }
 
-function updatePresetButtons() {
-    document.querySelectorAll('.btn-preset').forEach(btn => {
-        const rate = parseFloat(btn.dataset.rate);
-        if (Math.abs(rate - userSettings.ratePerKm) < 0.01) {
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
+function updateVehicleSettings() {
+    // Mettre à jour les sélections dans l'interface
+    document.querySelectorAll('input[name="vehicleType"]').forEach(input => {
+        input.checked = input.value === userSettings.vehicleType;
     });
+    document.querySelectorAll('input[name="motorisation"]').forEach(input => {
+        input.checked = input.value === userSettings.motorisation;
+    });
+    
+    const fiscalPowerSelect = document.getElementById('fiscalPower');
+    if (fiscalPowerSelect) fiscalPowerSelect.value = userSettings.fiscalPower;
+    
+    const annualKmSelect = document.getElementById('annualKm');
+    if (annualKmSelect) annualKmSelect.value = userSettings.annualKm;
+    
+    // Mettre à jour options selon type véhicule
+    updateKmRanges();
+    updateFiscalPowerOptions();
+    
+    // Afficher le tarif calculé
+    displayCalculatedRate();
+}
+
+function displayCalculatedRate() {
+    // Calculer pour 100 km pour afficher le tarif moyen
+    const totalIndemnite = calculateIndemnite(
+        100, 
+        userSettings.vehicleType, 
+        userSettings.motorisation, 
+        userSettings.fiscalPower, 
+        userSettings.annualKm
+    );
+    const ratePerKm = totalIndemnite / 100;
+    
+    const rateDisplay = document.getElementById('calculatedRate');
+    if (rateDisplay) {
+        rateDisplay.textContent = ratePerKm.toFixed(3) + ' €/km';
+    }
+}
+
+function updatePresetButtons() {
+    // Cette fonction n'est plus nécessaire avec le barème
+    // On la garde vide pour éviter les erreurs
 }
 
 // ===== AFFICHAGE LIVRAISONS =====
@@ -259,7 +427,6 @@ function renderDeliveries() {
                 <div class="detail-item">${delivery.distance?.toFixed(0) || 0} km</div>
                 <div class="detail-item">${delivery.startKm || 0} → ${delivery.endKm || 0}</div>
             </div>
-            <div class="delivery-rate">${delivery.ratePerKm?.toFixed(2)} €/km</div>
             ${delivery.notes ? `<p style="margin-top: 12px; padding: 12px; background: var(--gray-50); border-radius: 10px; font-size: 13px; color: var(--gray-600); border-left: 3px solid var(--primary);">${delivery.notes}</p>` : ''}
         </div>
     `).join('');
@@ -334,12 +501,17 @@ function requestGPSPermission() {
         },
         (error) => {
             if (error.code === error.PERMISSION_DENIED) {
-                // Afficher un message uniquement si refusé
+                // Afficher message avec chemin iOS
                 setTimeout(() => {
-                    if (confirm('📍 La géolocalisation est nécessaire pour le mode automatique.\n\nAutorisez l\'accès dans les paramètres de votre navigateur.')) {
-                        // Sur iOS, proposer d'ouvrir les réglages
-                        console.log('Veuillez activer la localisation dans les paramètres');
-                    }
+                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                    const message = isIOS 
+                        ? '📍 Géolocalisation nécessaire pour le mode automatique.\n\n' +
+                          'Activez-la dans :\n' +
+                          'Réglages > Confidentialité et sécurité > Service de localisation > Safari\n\n' +
+                          'Puis actualisez la page.'
+                        : '📍 Géolocalisation nécessaire pour le mode automatique.\n\n' +
+                          'Autorisez l\'accès dans les paramètres de votre navigateur.';
+                    alert(message);
                 }, 500);
             }
         },
@@ -350,14 +522,19 @@ function requestGPSPermission() {
 // ===== CALCUL MANUEL =====
 document.getElementById('deliveryStartKm').addEventListener('input', calculateDelivery);
 document.getElementById('deliveryEndKm').addEventListener('input', calculateDelivery);
-document.getElementById('deliveryRate').addEventListener('input', calculateDelivery);
 
 function calculateDelivery() {
     const startKm = parseFloat(document.getElementById('deliveryStartKm').value) || 0;
     const endKm = parseFloat(document.getElementById('deliveryEndKm').value) || 0;
-    const rate = parseFloat(document.getElementById('deliveryRate').value) || userSettings.ratePerKm;
     const distance = Math.max(0, endKm - startKm);
-    const payment = distance * rate;
+    
+    const payment = calculateIndemnite(
+        distance,
+        userSettings.vehicleType,
+        userSettings.motorisation,
+        userSettings.fiscalPower,
+        userSettings.annualKm
+    );
 
     document.getElementById('calcDistance').textContent = distance.toFixed(0) + ' km';
     document.getElementById('calcPayment').textContent = payment.toFixed(2) + ' €';
@@ -370,7 +547,6 @@ document.getElementById('deliveryForm').addEventListener('submit', (e) => {
     const clientName = document.getElementById('deliveryClient').value.trim();
     const startKm = parseFloat(document.getElementById('deliveryStartKm').value);
     const endKm = parseFloat(document.getElementById('deliveryEndKm').value);
-    const rate = parseFloat(document.getElementById('deliveryRate').value) || userSettings.ratePerKm;
     const distance = endKm - startKm;
 
     if (!clientName) {
@@ -388,7 +564,13 @@ document.getElementById('deliveryForm').addEventListener('submit', (e) => {
         return;
     }
 
-    const payment = distance * rate;
+    const payment = calculateIndemnite(
+        distance,
+        userSettings.vehicleType,
+        userSettings.motorisation,
+        userSettings.fiscalPower,
+        userSettings.annualKm
+    );
 
     const delivery = {
         id: Date.now(),
@@ -400,7 +582,12 @@ document.getElementById('deliveryForm').addEventListener('submit', (e) => {
         endKm: endKm,
         distance: distance,
         payment: payment,
-        ratePerKm: rate,
+        vehicleConfig: {
+            type: userSettings.vehicleType,
+            motorisation: userSettings.motorisation,
+            fiscalPower: userSettings.fiscalPower,
+            annualKm: userSettings.annualKm
+        },
         notes: document.getElementById('deliveryNotes').value.trim(),
         createdAt: new Date().toISOString()
     };
@@ -493,7 +680,15 @@ function startGPSTrip() {
             // Afficher erreur uniquement si vraiment nécessaire
             console.error('Erreur GPS:', error);
             if (error.code === error.PERMISSION_DENIED) {
-                alert('❌ Permission GPS refusée.\nActivez la localisation dans les paramètres de votre appareil.');
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                const message = isIOS 
+                    ? '❌ Permission GPS refusée.\n\n' +
+                      'Activez-la dans :\n' +
+                      'Réglages > Confidentialité et sécurité > Service de localisation > Safari\n\n' +
+                      'Puis actualisez la page.'
+                    : '❌ Permission GPS refusée.\n\n' +
+                      'Activez la localisation dans les paramètres de votre appareil.';
+                alert(message);
             }
         }
     );
@@ -540,7 +735,6 @@ function stopGPSTrip() {
     }
     
     const clientName = document.getElementById('autoClient').value.trim();
-    const rate = parseFloat(document.getElementById('autoRate').value) || userSettings.ratePerKm;
     
     if (!clientName) {
         alert('❌ Entrez le nom du client');
@@ -549,7 +743,13 @@ function stopGPSTrip() {
     }
     
     const distanceKm = Math.round(tripData.distance);
-    const payment = distanceKm * rate;
+    const payment = calculateIndemnite(
+        distanceKm,
+        userSettings.vehicleType,
+        userSettings.motorisation,
+        userSettings.fiscalPower,
+        userSettings.annualKm
+    );
     
     const delivery = {
         id: Date.now(),
@@ -561,7 +761,12 @@ function stopGPSTrip() {
         endKm: 0,
         distance: distanceKm,
         payment: payment,
-        ratePerKm: rate,
+        vehicleConfig: {
+            type: userSettings.vehicleType,
+            motorisation: userSettings.motorisation,
+            fiscalPower: userSettings.fiscalPower,
+            annualKm: userSettings.annualKm
+        },
         notes: `Trajet GPS - ${tripData.distance.toFixed(2)} km réels - ${tripData.positions.length} points enregistrés`,
         createdAt: new Date().toISOString()
     };
@@ -645,32 +850,96 @@ function handleGPSError(error) {
 document.getElementById('btnStartTrip').addEventListener('click', startGPSTrip);
 document.getElementById('btnStopTrip').addEventListener('click', stopGPSTrip);
 
-// ===== PARAMÈTRES - AUTO-SAUVEGARDE =====
-document.getElementById('settingsRate').addEventListener('change', function() {
-    userSettings.ratePerKm = parseFloat(this.value);
-    saveSettings();
-    document.getElementById('deliveryRate').value = userSettings.ratePerKm;
-    document.getElementById('autoRate').value = userSettings.ratePerKm;
-    updatePresetButtons();
-});
-
-document.getElementById('settingsVehicle').addEventListener('change', function() {
-    userSettings.vehicleInfo = this.value;
-    saveSettings();
-});
-
-// ===== PRESETS TARIF =====
-document.querySelectorAll('.btn-preset').forEach(btn => {
-    btn.addEventListener('click', function() {
-        const rate = parseFloat(this.dataset.rate);
-        userSettings.ratePerKm = rate;
-        document.getElementById('settingsRate').value = rate;
-        document.getElementById('deliveryRate').value = rate;
-        document.getElementById('autoRate').value = rate;
+// ===== PARAMÈTRES VÉHICULE - AUTO-SAUVEGARDE =====
+// Type de véhicule
+document.querySelectorAll('input[name="vehicleType"]').forEach(input => {
+    input.addEventListener('change', function() {
+        userSettings.vehicleType = this.value;
+        updateKmRanges();
+        updateFiscalPowerOptions();
         saveSettings();
-        updatePresetButtons();
+        displayCalculatedRate();
     });
 });
+
+// Motorisation
+document.querySelectorAll('input[name="motorisation"]').forEach(input => {
+    input.addEventListener('change', function() {
+        userSettings.motorisation = this.value;
+        saveSettings();
+        displayCalculatedRate();
+    });
+});
+
+// Chevaux fiscaux
+const fiscalPowerSelect = document.getElementById('fiscalPower');
+if (fiscalPowerSelect) {
+    fiscalPowerSelect.addEventListener('change', function() {
+        userSettings.fiscalPower = this.value;
+        saveSettings();
+        displayCalculatedRate();
+    });
+}
+
+// Kilométrage annuel
+const annualKmSelect = document.getElementById('annualKm');
+if (annualKmSelect) {
+    annualKmSelect.addEventListener('change', function() {
+        userSettings.annualKm = this.value;
+        saveSettings();
+        displayCalculatedRate();
+    });
+}
+
+// Mettre à jour les options de kilométrage selon le type de véhicule
+function updateKmRanges() {
+    const annualKmSelect = document.getElementById('annualKm');
+    if (!annualKmSelect) return;
+    
+    const isAuto = userSettings.vehicleType === 'auto';
+    
+    annualKmSelect.innerHTML = isAuto
+        ? `<option value="tranche1">Moins de 5 000 km/an (~14 km/jour)</option>
+           <option value="tranche2">Entre 5 001 et 20 000 km/an (~27 à 55 km/jour)</option>
+           <option value="tranche3">Plus de 20 000 km/an (~55+ km/jour)</option>`
+        : `<option value="tranche1">Moins de 3 000 km/an (~8 km/jour)</option>
+           <option value="tranche2">Entre 3 001 et 6 000 km/an (~16 km/jour)</option>
+           <option value="tranche3">Plus de 6 000 km/an (~16+ km/jour)</option>`;
+    
+    // Sélectionner la tranche sauvegardée
+    annualKmSelect.value = userSettings.annualKm;
+}
+
+// Mettre à jour les options de puissance fiscale selon le type de véhicule
+function updateFiscalPowerOptions() {
+    const fiscalPowerSelect = document.getElementById('fiscalPower');
+    if (!fiscalPowerSelect) return;
+    
+    if (userSettings.vehicleType === 'auto') {
+        fiscalPowerSelect.innerHTML = `
+            <option value="cv3">3 CV et moins</option>
+            <option value="cv4">4 CV</option>
+            <option value="cv5">5 CV</option>
+            <option value="cv6">6 CV</option>
+            <option value="cv7">7 CV et plus</option>
+        `;
+    } else if (userSettings.vehicleType === 'moto') {
+        fiscalPowerSelect.innerHTML = `
+            <option value="cv12">1 ou 2 CV</option>
+            <option value="cv345">3, 4 ou 5 CV</option>
+            <option value="cv5plus">Plus de 5 CV</option>
+        `;
+    } else {
+        // Cyclo n'a pas de choix de CV
+        fiscalPowerSelect.innerHTML = `<option value="unique">Cyclomoteur (pas de CV)</option>`;
+        fiscalPowerSelect.disabled = true;
+        userSettings.fiscalPower = 'unique';
+        return;
+    }
+    
+    fiscalPowerSelect.disabled = false;
+    fiscalPowerSelect.value = userSettings.fiscalPower;
+}
 
 // ===== THÈME =====
 function applyTheme(theme) {
@@ -701,7 +970,7 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         ['ROUTE NOTE - ' + currentUser.username.toUpperCase()],
         ['Généré le : ' + new Date().toLocaleString('fr-FR')],
         [''],
-        ['Date', 'Client', 'Début', 'Fin', 'Km Départ', 'Km Arrivée', 'Distance (km)', 'Tarif (€/km)', 'Paiement (€)', 'Notes']
+        ['Date', 'Client', 'Début', 'Fin', 'Km Départ', 'Km Arrivée', 'Distance (km)', 'Paiement (€)', 'Notes']
     ];
 
     deliveries.forEach(d => {
@@ -713,7 +982,6 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
             d.startKm || 0,
             d.endKm || 0,
             d.distance?.toFixed(0) || 0,
-            d.ratePerKm?.toFixed(2) || 0,
             d.payment?.toFixed(2) || 0,
             d.notes || ''
         ]);
@@ -723,7 +991,7 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     const totalPayment = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
     
     data.push(['']);
-    data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), '', totalPayment.toFixed(2), '']);
+    data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), totalPayment.toFixed(2), '']);
     data.push(['']);
     data.push(['STATISTIQUES']);
     data.push(['Nombre de livraisons', deliveries.length]);
@@ -733,11 +1001,10 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
 
     const ws = XLSX.utils.aoa_to_sheet(data);
     
-    // Largeur colonnes
+    // Largeur colonnes (une colonne en moins maintenant)
     ws['!cols'] = [
         { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 10 },
-        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
-        { wch: 14 }, { wch: 35 }
+        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 35 }
     ];
 
     // STYLES PROFESSIONNELS
@@ -791,15 +1058,15 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     // Sous-titre
     if (ws['A2']) ws['A2'].s = subtitleStyle;
     
-    // En-têtes (ligne 4)
-    for (let col = 0; col < 10; col++) {
+    // En-têtes (ligne 4) - 9 colonnes maintenant
+    for (let col = 0; col < 9; col++) {
         const cell = String.fromCharCode(65 + col) + '4';
         if (ws[cell]) ws[cell].s = headerStyle;
     }
 
     // Données (lignes 5 à 4+deliveries.length)
     for (let row = 5; row <= 4 + deliveries.length; row++) {
-        for (let col = 0; col < 10; col++) {
+        for (let col = 0; col < 9; col++) {
             const cell = String.fromCharCode(65 + col) + row;
             if (ws[cell]) {
                 ws[cell].s = dataStyle;
@@ -813,7 +1080,7 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
 
     // Ligne TOTAUX
     const totalRow = 4 + deliveries.length + 2;
-    for (let col = 0; col < 10; col++) {
+    for (let col = 0; col < 9; col++) {
         const cell = String.fromCharCode(65 + col) + totalRow;
         if (ws[cell]) ws[cell].s = totalStyle;
     }
@@ -822,10 +1089,10 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     const statsRow = totalRow + 2;
     if (ws['A' + statsRow]) ws['A' + statsRow].s = statsHeaderStyle;
 
-    // Fusion cellules titre
+    // Fusion cellules titre - 9 colonnes
     ws['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }, // Titre
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } }  // Sous-titre
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }, // Titre
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 8 } }  // Sous-titre
     ];
 
     const wb = XLSX.utils.book_new();

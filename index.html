@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Route Note">
     <title>Route Note</title>
-    <link rel="manifest" href="./ manifest.json">
+    <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="styles.css">
@@ -106,10 +106,6 @@
                                 <input type="number" step="1" class="form-input" id="deliveryEndKm" required>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label class="form-label">Tarif (€/km)</label>
-                            <input type="number" step="0.01" min="0" class="form-input" id="deliveryRate">
-                        </div>
                         <div class="calculation-display">
                             <div class="calc-row">
                                 <span class="calc-label">Distance</span>
@@ -132,10 +128,6 @@
                         <div class="form-group">
                             <label class="form-label">Client</label>
                             <input type="text" class="form-input" id="autoClient" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Tarif (€/km)</label>
-                            <input type="number" step="0.01" min="0" class="form-input" id="autoRate">
                         </div>
                         <div id="tripStatus" class="trip-status">
                             <div class="trip-info">Trajet non démarré</div>
@@ -179,33 +171,79 @@
 
             <div class="settings-section">
                 <div class="settings-header">
-                    <div class="settings-icon" style="background: linear-gradient(135deg, #d1fae5, #10b981);">💰</div>
+                    <div class="settings-icon" style="background: linear-gradient(135deg, #d1fae5, #10b981);">🚗</div>
                     <div>
-                        <div class="settings-title">Tarif par défaut</div>
-                        <div class="settings-description">Auto-sauvegardé</div>
+                        <div class="settings-title">Indemnité Kilométrique</div>
+                        <div class="settings-description">Barème officiel 2025</div>
                     </div>
                 </div>
+                
+                <!-- Type de véhicule -->
                 <div class="form-group">
-                    <input type="number" step="0.01" min="0" class="form-input" id="settingsRate" style="text-align: center; font-size: 28px; font-weight: 700;">
-                </div>
-                <div class="preset-buttons">
-                    <button type="button" class="btn-preset" data-rate="0.30">0.30</button>
-                    <button type="button" class="btn-preset" data-rate="0.40">0.40</button>
-                    <button type="button" class="btn-preset active" data-rate="0.50">0.50</button>
-                    <button type="button" class="btn-preset" data-rate="0.60">0.60</button>
-                    <button type="button" class="btn-preset" data-rate="0.70">0.70</button>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <div class="settings-header">
-                    <div class="settings-icon" style="background: linear-gradient(135deg, #fed7aa, #f97316);">🚗</div>
-                    <div>
-                        <div class="settings-title">Véhicule</div>
+                    <label class="form-label">Type de véhicule</label>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <label style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--gray-300); border-radius: 10px; cursor: pointer; text-align: center; font-size: 13px; font-weight: 600; transition: all 0.3s;">
+                            <input type="radio" name="vehicleType" value="auto" style="display: none;">
+                            <span style="display: block;">🚗 Auto</span>
+                        </label>
+                        <label style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--gray-300); border-radius: 10px; cursor: pointer; text-align: center; font-size: 13px; font-weight: 600; transition: all 0.3s;">
+                            <input type="radio" name="vehicleType" value="moto" style="display: none;">
+                            <span style="display: block;">🏍️ Moto</span>
+                        </label>
+                        <label style="flex: 1; min-width: 100px; padding: 12px; border: 2px solid var(--gray-300); border-radius: 10px; cursor: pointer; text-align: center; font-size: 13px; font-weight: 600; transition: all 0.3s;">
+                            <input type="radio" name="vehicleType" value="cyclo" style="display: none;">
+                            <span style="display: block;">🛵 Cyclo</span>
+                        </label>
                     </div>
                 </div>
+                
+                <!-- Motorisation -->
                 <div class="form-group">
-                    <input type="text" class="form-input" id="settingsVehicle" placeholder="Ex: Renault Kangoo">
+                    <label class="form-label">Motorisation</label>
+                    <div style="display: flex; gap: 8px;">
+                        <label style="flex: 1; padding: 12px; border: 2px solid var(--gray-300); border-radius: 10px; cursor: pointer; text-align: center; font-size: 13px; font-weight: 600; transition: all 0.3s;">
+                            <input type="radio" name="motorisation" value="thermique" style="display: none;">
+                            <span style="display: block;">⛽ Thermique / Hybride</span>
+                        </label>
+                        <label style="flex: 1; padding: 12px; border: 2px solid var(--gray-300); border-radius: 10px; cursor: pointer; text-align: center; font-size: 13px; font-weight: 600; transition: all 0.3s;">
+                            <input type="radio" name="motorisation" value="electrique" style="display: none;">
+                            <span style="display: block;">🔋 Électrique</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Chevaux fiscaux -->
+                <div class="form-group">
+                    <label class="form-label">
+                        Chevaux fiscaux (CV)
+                        <a href="https://www.impots.gouv.fr/particulier/questions/comment-determiner-la-puissance-fiscale-de-mon-vehicule-electrique-pour-le" target="_blank" style="font-size: 11px; color: var(--primary); text-decoration: none; margin-left: 8px;">
+                            ℹ️ Comment trouver mes CV ?
+                        </a>
+                    </label>
+                    <select class="form-input" id="fiscalPower" style="font-size: 15px;">
+                        <option value="cv3">3 CV et moins</option>
+                        <option value="cv4" selected>4 CV</option>
+                        <option value="cv5">5 CV</option>
+                        <option value="cv6">6 CV</option>
+                        <option value="cv7">7 CV et plus</option>
+                    </select>
+                </div>
+                
+                <!-- Kilométrage annuel -->
+                <div class="form-group">
+                    <label class="form-label">Kilométrage annuel estimé</label>
+                    <select class="form-input" id="annualKm" style="font-size: 14px;">
+                        <option value="tranche1">Moins de 5 000 km/an (~14 km/jour)</option>
+                        <option value="tranche2" selected>Entre 5 001 et 20 000 km/an (~27 à 55 km/jour)</option>
+                        <option value="tranche3">Plus de 20 000 km/an (~55+ km/jour)</option>
+                    </select>
+                </div>
+                
+                <!-- Tarif calculé -->
+                <div style="background: linear-gradient(135deg, #d1fae5, #a7f3d0); padding: 16px; border-radius: 12px; text-align: center; margin-top: 16px;">
+                    <div style="font-size: 12px; color: #065f46; font-weight: 600; margin-bottom: 4px;">TARIF CALCULÉ</div>
+                    <div style="font-size: 32px; font-weight: 700; color: #065f46;" id="calculatedRate">0.427 €/km</div>
+                    <div style="font-size: 11px; color: #059669; margin-top: 4px;">Basé sur le barème officiel 2025</div>
                 </div>
             </div>
 

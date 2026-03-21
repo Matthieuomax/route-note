@@ -158,6 +158,22 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 .btn-preset{padding:8px 14px;border:2px solid var(--gray-300);background:#fff;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;transition:all .3s}
 .btn-preset.active{background:linear-gradient(135deg,var(--primary),var(--primary-dark));border-color:var(--primary);color:#fff}
 
+/* Radio buttons véhicule */
+input[type="radio"]:checked + span {
+    color: #fff;
+}
+input[type="radio"] + span {
+    transition: all 0.3s;
+}
+label:has(input[type="radio"]:checked) {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark)) !important;
+    border-color: var(--primary) !important;
+    color: #fff !important;
+}
+label:has(input[type="radio"]:checked) span {
+    color: #fff !important;
+}
+
 /* Themes */
 .theme-selector{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}
 .theme-option{aspect-ratio:1;border-radius:12px;cursor:pointer;border:3px solid transparent;transition:all .3s;position:relative}
