@@ -18,7 +18,7 @@
         <div class="auth-card">
             <div class="auth-logo">🚚</div>
             <h1 class="auth-title">Route Note</h1>
-            <p class="auth-subtitle">Gestion de vos livraisons</p>
+            <p class="auth-subtitle">Gestion de vos déplacements</p>
             <div id="authError" class="error-message hidden"></div>
             <div id="authSuccess" class="success-message hidden"></div>
             <form id="loginForm">
@@ -51,13 +51,8 @@
                     <div class="stat-value" id="totalKm">0</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon" style="background: linear-gradient(135deg, #d1fae5, #10b981);">💰</div>
-                    <div class="stat-label">Paiement</div>
-                    <div class="stat-value" id="totalPayment">0 €</div>
-                </div>
-                <div class="stat-card">
                     <div class="stat-icon" style="background: linear-gradient(135deg, #fed7aa, #f97316);">📦</div>
-                    <div class="stat-label">Livraisons</div>
+                    <div class="stat-label">Trajets</div>
                     <div class="stat-value" id="totalDeliveries">0</div>
                 </div>
                 <div class="stat-card">
@@ -65,11 +60,26 @@
                     <div class="stat-label">Moyenne</div>
                     <div class="stat-value" id="avgKm">0 km</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: linear-gradient(135deg, #bfdbfe, #60a5fa);">🧮</div>
+                    <div class="stat-label">Base trajets</div>
+                    <div class="stat-value" id="baseTrajets">0 €</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: linear-gradient(135deg, #fef3c7, #fbbf24);">📄</div>
+                    <div class="stat-label">Partie fixe</div>
+                    <div class="stat-value" id="partieFixe">0 €</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: linear-gradient(135deg, #d1fae5, #10b981);">💰</div>
+                    <div class="stat-label">Total</div>
+                    <div class="stat-value" id="totalPayment">0 €</div>
+                </div>
             </div>
 
             <div id="deliveryFormContainer" class="hidden">
                 <div class="delivery-form">
-                    <h2 class="form-title">Nouvelle livraison</h2>
+                    <h2 class="form-title">Nouveau déplacement</h2>
                     <div class="mode-switch">
                         <button type="button" class="mode-btn active" data-mode="manual">Manuel</button>
                         <button type="button" class="mode-btn" data-mode="auto">Automatique</button>
@@ -82,7 +92,7 @@
                                 <input type="date" class="form-input" id="deliveryDate" required>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">Client</label>
+                                <label class="form-label">Motif de déplacement</label>
                                 <input type="text" class="form-input" id="deliveryClient" required>
                             </div>
                         </div>
@@ -143,7 +153,7 @@
 
             <div class="deliveries-section">
                 <div class="section-header">
-                    <h2 class="section-title">📋 Livraisons</h2>
+                    <h2 class="section-title">📋 Déplacements</h2>
                     <span id="deliveryCount" style="color: rgba(255,255,255,0.9); font-size: 12px; font-weight: 600;">0</span>
                 </div>
                 <div id="deliveriesList"></div>
@@ -234,7 +244,7 @@
                     <label class="form-label">Kilométrage annuel estimé</label>
                     <select class="form-input" id="annualKm" style="font-size: 14px;">
                         <option value="tranche1">Moins de 5 000 km/an (~14 km/jour)</option>
-                        <option value="tranche2" selected>Entre 5 001 et 20 000 km/an (~27 à 55 km/jour)</option>
+                        <option value="tranche2" selected>Entre 5 001 et 20 000 km/an (~14 à 55 km/jour)</option>
                         <option value="tranche3">Plus de 20 000 km/an (~55+ km/jour)</option>
                     </select>
                 </div>
@@ -243,7 +253,7 @@
                 <div style="background: linear-gradient(135deg, #d1fae5, #a7f3d0); padding: 16px; border-radius: 12px; text-align: center; margin-top: 16px;">
                     <div style="font-size: 12px; color: #065f46; font-weight: 600; margin-bottom: 4px;">TARIF CALCULÉ</div>
                     <div style="font-size: 32px; font-weight: 700; color: #065f46;" id="calculatedRate">0.427 €/km</div>
-                    <div style="font-size: 11px; color: #059669; margin-top: 4px;">Basé sur le barème officiel 2025</div>
+                    <div style="font-size: 11px; color: #059669; margin-top: 4px;">Basé sur le barème officiel</div>
                 </div>
             </div>
 

@@ -178,7 +178,8 @@ const BAREME_KM = {
 };
 
 // ===== CALCUL INDEMNITÉ =====
-function calculateIndemnite(distance, vehicleType, motorisation, fiscalPower, annualKm) {
+// Calcul pour UN TRAJET (juste multiplication, sans partie fixe)
+function calculateIndemnitePourTrajet(distance, vehicleType, motorisation, fiscalPower, annualKm) {
     const key = `${vehicleType}_${motorisation}`;
     const bareme = BAREME_KM[key];
     
@@ -197,8 +198,52 @@ function calculateIndemnite(distance, vehicleType, motorisation, fiscalPower, an
     const tranche = tranches[annualKm];
     if (!tranche) return 0;
     
-    // Calculer le montant
-    return tranche.calc(distance);
+    // Pour tranche 1 et 3 : juste multiplication
+    // Pour tranche 2 : extraire le coefficient (sans la partie fixe)
+    if (annualKm === 'tranche1' || annualKm === 'tranche3') {
+        return tranche.calc(distance);
+    } else {
+        // Tranche 2 : extraire coefficient de multiplication
+        const coef = getCoefMultiplication(vehicleType, motorisation, powerKey);
+        return distance * coef;
+    }
+}
+
+// Récupérer coefficient de multiplication pour tranche 2
+function getCoefMultiplication(vehicleType, motorisation, powerKey) {
+    const coefficients = {
+        auto_thermique: { cv3: 0.316, cv4: 0.340, cv5: 0.357, cv6: 0.374, cv7: 0.394 },
+        auto_electrique: { cv3: 0.379, cv4: 0.408, cv5: 0.428, cv6: 0.449, cv7: 0.473 },
+        moto_thermique: { cv12: 0.099, cv345: 0.082, cv5plus: 0.079 },
+        moto_electrique: { cv12: 0.119, cv345: 0.098, cv5plus: 0.095 },
+        cyclo_thermique: { unique: 0.079 },
+        cyclo_electrique: { unique: 0.095 }
+    };
+    
+    const key = `${vehicleType}_${motorisation}`;
+    return coefficients[key]?.[powerKey] || 0;
+}
+
+// Récupérer partie fixe annuelle (pour tranche 2 uniquement)
+function getPartieFixeAnnuelle(vehicleType, motorisation, fiscalPower, annualKm) {
+    if (annualKm !== 'tranche2') return 0;
+    
+    const partiesFixes = {
+        auto_thermique: { cv3: 1065, cv4: 1330, cv5: 1395, cv6: 1457, cv7: 1515 },
+        auto_electrique: { cv3: 1278, cv4: 1596, cv5: 1674, cv6: 1748, cv7: 1818 },
+        moto_thermique: { cv12: 891, cv345: 1158, cv5plus: 1583 },
+        moto_electrique: { cv12: 1069, cv345: 1390, cv5plus: 1900 },
+        cyclo_thermique: { unique: 711 },
+        cyclo_electrique: { unique: 853 }
+    };
+    
+    let powerKey = fiscalPower;
+    if (vehicleType === 'cyclo') {
+        powerKey = 'unique';
+    }
+    
+    const key = `${vehicleType}_${motorisation}`;
+    return partiesFixes[key]?.[powerKey] || 0;
 }
 
 // ===== VARIABLES GLOBALES =====
@@ -339,11 +384,24 @@ function updateUI() {
     document.getElementById('deliveryDate').value = today.toISOString().split('T')[0];
 
     const totalKm = deliveries.reduce((sum, d) => sum + (d.distance || 0), 0);
-    const totalPayment = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
+    const baseTrajets = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
     const avgKm = deliveries.length > 0 ? totalKm / deliveries.length : 0;
+    
+    // Calculer partie fixe annuelle
+    const partieFixe = getPartieFixeAnnuelle(
+        userSettings.vehicleType,
+        userSettings.motorisation,
+        userSettings.fiscalPower,
+        userSettings.annualKm
+    );
+    
+    // Total avec partie fixe
+    const totalAvecPartieFixe = baseTrajets + partieFixe;
 
     document.getElementById('totalKm').textContent = totalKm.toFixed(1);
-    document.getElementById('totalPayment').textContent = totalPayment.toFixed(2) + ' €';
+    document.getElementById('baseTrajets').textContent = baseTrajets.toFixed(2) + ' €';
+    document.getElementById('partieFixe').textContent = partieFixe.toFixed(2) + ' €';
+    document.getElementById('totalPayment').textContent = totalAvecPartieFixe.toFixed(2) + ' €';
     document.getElementById('totalDeliveries').textContent = deliveries.length;
     document.getElementById('avgKm').textContent = avgKm.toFixed(1) + ' km';
     document.getElementById('deliveryCount').textContent = deliveries.length + ' trajets';
@@ -377,19 +435,31 @@ function updateVehicleSettings() {
 }
 
 function displayCalculatedRate() {
-    // Calculer pour 100 km pour afficher le tarif moyen
-    const totalIndemnite = calculateIndemnite(
-        100, 
+    // Calculer moyenne sur distance représentative
+    const kmReference = (userSettings.vehicleType === 'auto') ? 12500 : 4500;
+    
+    // Calcul total avec partie fixe
+    const baseKm = calculateIndemnitePourTrajet(
+        kmReference, 
         userSettings.vehicleType, 
         userSettings.motorisation, 
         userSettings.fiscalPower, 
         userSettings.annualKm
     );
-    const ratePerKm = totalIndemnite / 100;
+    
+    const partieFixe = getPartieFixeAnnuelle(
+        userSettings.vehicleType,
+        userSettings.motorisation,
+        userSettings.fiscalPower,
+        userSettings.annualKm
+    );
+    
+    const totalIndemnite = baseKm + partieFixe;
+    const moyenneParKm = totalIndemnite / kmReference;
     
     const rateDisplay = document.getElementById('calculatedRate');
     if (rateDisplay) {
-        rateDisplay.textContent = ratePerKm.toFixed(3) + ' €/km';
+        rateDisplay.textContent = moyenneParKm.toFixed(3) + ' €/km';
     }
 }
 
@@ -406,7 +476,7 @@ function renderDeliveries() {
         container.innerHTML = `
             <div class="empty-state">
                 <div class="empty-icon">📦</div>
-                <p style="color: var(--gray-500); margin-bottom: 16px; font-size: 16px; font-weight: 500;">Aucune livraison enregistrée</p>
+                <p style="color: var(--gray-500); margin-bottom: 16px; font-size: 16px; font-weight: 500;">Aucun déplacement enregistré</p>
                 <p style="color: var(--gray-400); margin-bottom: 20px; font-size: 14px;">Cliquez sur le bouton + pour commencer</p>
             </div>
         `;
@@ -528,7 +598,7 @@ function calculateDelivery() {
     const endKm = parseFloat(document.getElementById('deliveryEndKm').value) || 0;
     const distance = Math.max(0, endKm - startKm);
     
-    const payment = calculateIndemnite(
+    const payment = calculateIndemnitePourTrajet(
         distance,
         userSettings.vehicleType,
         userSettings.motorisation,
@@ -564,7 +634,7 @@ document.getElementById('deliveryForm').addEventListener('submit', (e) => {
         return;
     }
 
-    const payment = calculateIndemnite(
+    const payment = calculateIndemnitePourTrajet(
         distance,
         userSettings.vehicleType,
         userSettings.motorisation,
@@ -601,7 +671,7 @@ document.getElementById('deliveryForm').addEventListener('submit', (e) => {
     document.getElementById('deliveryForm').reset();
     document.getElementById('deliveryDate').value = new Date().toISOString().split('T')[0];
     
-    alert('✅ Livraison enregistrée avec succès !');
+    alert('✅ Déplacement enregistré avec succès !');
 });
 
 // ===== GÉOLOCALISATION - CALCUL DISTANCE =====
@@ -743,7 +813,7 @@ function stopGPSTrip() {
     }
     
     const distanceKm = Math.round(tripData.distance);
-    const payment = calculateIndemnite(
+    const payment = calculateIndemnitePourTrajet(
         distanceKm,
         userSettings.vehicleType,
         userSettings.motorisation,
@@ -789,7 +859,7 @@ function stopGPSTrip() {
         box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4); z-index: 9999;
         animation: slideDown 0.3s ease-out;
     `;
-    successMsg.innerHTML = `✅ Livraison GPS enregistrée !<br><small>${tripData.distance.toFixed(2)} km • ${payment.toFixed(2)} €</small>`;
+    successMsg.innerHTML = `✅ Trajet GPS enregistré !<br><small>${tripData.distance.toFixed(2)} km • ${payment.toFixed(2)} €</small>`;
     document.body.appendChild(successMsg);
     
     setTimeout(() => {
@@ -988,16 +1058,30 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     });
 
     const totalKm = deliveries.reduce((sum, d) => sum + (d.distance || 0), 0);
-    const totalPayment = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
+    const baseTrajets = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
+    
+    // Partie fixe annuelle
+    const partieFixe = getPartieFixeAnnuelle(
+        userSettings.vehicleType,
+        userSettings.motorisation,
+        userSettings.fiscalPower,
+        userSettings.annualKm
+    );
+    
+    const totalAvecPartieFixe = baseTrajets + partieFixe;
     
     data.push(['']);
-    data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), totalPayment.toFixed(2), '']);
+    data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), baseTrajets.toFixed(2), '']);
+    data.push(['']);
+    data.push(['DÉTAIL DU CALCUL']);
+    data.push(['Base trajets (km × tarif)', baseTrajets.toFixed(2) + ' €']);
+    data.push(['Partie fixe annuelle', partieFixe.toFixed(2) + ' €']);
+    data.push(['TOTAL AVEC PARTIE FIXE', totalAvecPartieFixe.toFixed(2) + ' €']);
     data.push(['']);
     data.push(['STATISTIQUES']);
-    data.push(['Nombre de livraisons', deliveries.length]);
+    data.push(['Nombre de déplacements', deliveries.length]);
     data.push(['Distance totale', totalKm.toFixed(0) + ' km']);
-    data.push(['Paiement total', totalPayment.toFixed(2) + ' €']);
-    data.push(['Moyenne par livraison', (totalKm / deliveries.length).toFixed(0) + ' km']);
+    data.push(['Moyenne par trajet', (totalKm / deliveries.length).toFixed(0) + ' km']);
 
     const ws = XLSX.utils.aoa_to_sheet(data);
     
@@ -1096,7 +1180,7 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     ];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Livraisons');
+    XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
 
     const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, filename);

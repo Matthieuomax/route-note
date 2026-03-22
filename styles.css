@@ -84,14 +84,14 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 .user-info{color:var(--primary);font-size:13px;font-weight:600;margin-top:6px}
 
 /* Stats */
-.stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px}
+.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
 .stat-card{background:rgba(255,255,255,.95);backdrop-filter:blur(10px);padding:14px;border-radius:14px;box-shadow:0 4px 20px rgba(0,0,0,.1)}
 .stat-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;font-size:20px}
 .stat-label{color:var(--gray-600);font-size:11px;margin-bottom:4px;font-weight:500}
 .stat-value{font-size:22px;font-weight:700;color:var(--gray-900)}
 
 /* Delivery Form */
-.delivery-form{background:rgba(255,255,255,.95);backdrop-filter:blur(10px);padding:16px;border-radius:16px;margin-bottom:16px;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+.delivery-form{background:rgba(255,255,255,.95);backdrop-filter:blur(10px);padding:16px;border-radius:16px;margin-bottom:16px;box-shadow:0 4px 20px rgba(0,0,0,.1);border:2px solid var(--primary);box-shadow:0 0 0 4px rgba(37,99,235,.1),0 4px 20px rgba(0,0,0,.1)}
 .form-title{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--gray-900)}
 .form-row{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:12px}
 
@@ -190,6 +190,7 @@ label:has(input[type="radio"]:checked) span {
 .form-row{grid-template-columns:repeat(2,1fr)}
 .delivery-details{grid-template-columns:repeat(3,1fr)}
 }
+
 
 /* Very small screens */
 @media(max-width:380px){
