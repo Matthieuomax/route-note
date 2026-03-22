@@ -72,7 +72,7 @@
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" style="background: linear-gradient(135deg, #d1fae5, #10b981);">💰</div>
-                    <div class="stat-label">Total</div>
+                    <div class="stat-label">Total annuel</div>
                     <div class="stat-value" id="totalPayment">0 €</div>
                 </div>
             </div>
@@ -136,8 +136,8 @@
 
                     <div id="autoModeContainer" class="auto-mode-controls hidden">
                         <div class="form-group">
-                            <label class="form-label">Client</label>
-                            <input type="text" class="form-input" id="autoClient" required>
+                            <label class="form-label">Motif de déplacement</label>
+                            <input type="text" class="form-input" id="autoClient" placeholder="Ex : Visite client, Réunion..." required>
                         </div>
                         <div id="tripStatus" class="trip-status">
                             <div class="trip-info">Trajet non démarré</div>
@@ -298,6 +298,7 @@
             </button>
         </div>
     </div>
+
 
     <script src="app.js"></script>
 </body>

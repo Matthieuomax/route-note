@@ -283,6 +283,8 @@ if (savedUser) {
     currentUser = JSON.parse(savedUser);
     loadUserData();
     showApp();
+    // Forcer re-calcul partie fixe après rendu DOM complet
+    setTimeout(() => updateUI(), 0);
 }
 
 // ===== INSCRIPTION =====
@@ -398,6 +400,10 @@ function updateUI() {
     // Total avec partie fixe
     const totalAvecPartieFixe = baseTrajets + partieFixe;
 
+    // Mise à jour label "Total annuel" si pas encore fait
+    const totalLabel = document.querySelector('#totalPayment')?.closest('.stat-card')?.querySelector('.stat-label');
+    if (totalLabel) totalLabel.textContent = 'Total annuel';
+    
     document.getElementById('totalKm').textContent = totalKm.toFixed(1);
     document.getElementById('baseTrajets').textContent = baseTrajets.toFixed(2) + ' €';
     document.getElementById('partieFixe').textContent = partieFixe.toFixed(2) + ' €';
@@ -486,11 +492,14 @@ function renderDeliveries() {
     container.innerHTML = deliveries.map(delivery => `
         <div class="delivery-card">
             <div class="delivery-header">
-                <div>
+                <div style="flex:1;">
                     <div class="delivery-client">📦 ${delivery.clientName}</div>
                     <div class="delivery-date">${formatDate(delivery.date)}</div>
                 </div>
-                <div class="delivery-payment">${delivery.payment?.toFixed(2) || '0.00'} €</div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <div class="delivery-payment">${delivery.payment?.toFixed(2) || '0.00'} €</div>
+                    <button class="btn-delete" onclick="deleteDelivery(${delivery.id})" title="Supprimer ce trajet">✕</button>
+                </div>
             </div>
             <div class="delivery-details">
                 <div class="detail-item">${delivery.startTime || '--:--'} - ${delivery.endTime || '--:--'}</div>
@@ -506,6 +515,14 @@ function formatDate(dateString) {
     const date = new Date(dateString);
     const options = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
     return date.toLocaleDateString('fr-FR', options);
+}
+
+// ===== SUPPRESSION D'UN TRAJET =====
+function deleteDelivery(id) {
+    if (!confirm('Supprimer ce trajet ?')) return;
+    deliveries = deliveries.filter(d => d.id !== id);
+    LocalStorage.saveDeliveries(currentUser.username, deliveries);
+    updateUI();
 }
 
 // ===== FAB - BOUTON AJOUTER =====
@@ -710,7 +727,14 @@ function startGPSTrip() {
 
     const clientName = document.getElementById('autoClient').value.trim();
     if (!clientName) {
-        alert('❌ Veuillez entrer le nom du client avant de démarrer');
+        const input = document.getElementById('autoClient');
+        input.style.borderColor = 'var(--danger)';
+        input.placeholder = '⚠️ Champ obligatoire';
+        input.focus();
+        setTimeout(() => {
+            input.style.borderColor = '';
+            input.placeholder = 'Ex : Visite client, Réunion...';
+        }, 2500);
         return;
     }
 

@@ -132,7 +132,7 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 .delivery-rate{font-size:11px;color:var(--gray-500);margin-top:6px;font-style:italic}
 
 /* FAB */
-.fab{position:fixed;bottom:calc(80px + var(--safe-area-bottom));right:16px;width:56px;height:56px;background:linear-gradient(135deg,var(--secondary),#ea580c);border-radius:50%;border:none;color:#fff;font-size:28px;cursor:pointer;box-shadow:0 8px 24px rgba(249,115,22,.5);transition:all .3s;z-index:100;display:flex;align-items:center;justify-content:center}
+.fab{position:fixed;bottom:calc(88px + var(--safe-area-bottom));right:20px;width:64px;height:64px;background:linear-gradient(135deg,var(--secondary),#ea580c);border-radius:50%;border:none;color:#fff;font-size:32px;font-weight:300;cursor:pointer;box-shadow:0 8px 28px rgba(249,115,22,.6),0 2px 8px rgba(0,0,0,.2);transition:all .3s;z-index:100;display:flex;align-items:center;justify-content:center;line-height:1}
 .fab:active{transform:scale(.95)}
 
 /* Bottom Nav */
@@ -142,7 +142,9 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 .nav-icon{font-size:22px}
 .nav-label{font-size:11px;font-weight:600}
 
-/* Empty State */
+/* Bouton supprimer trajet */
+.btn-delete{width:28px;height:28px;border-radius:50%;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 8px rgba(239,68,68,.4);transition:all .2s;touch-action:manipulation}
+.btn-delete:active{transform:scale(.9)}
 .empty-state{text-align:center;padding:40px 16px;background:rgba(255,255,255,.95);backdrop-filter:blur(10px);border-radius:16px;border:2px dashed var(--gray-300)}
 .empty-icon{font-size:48px;margin-bottom:12px;opacity:.4}
 
