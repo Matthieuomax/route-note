@@ -1059,19 +1059,21 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         return;
     }
 
-    // 1. PRÉPARATION DES DONNÉES DE BASE
+    // 1. PRÉPARATION DES DONNÉES
     const totalKm = deliveries.reduce((sum, d) => sum + (d.distance || 0), 0);
     const baseTrajets = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
     
-    const partieFixe = getPartieFixeAnnuelle(
+    // (Assure-toi que la fonction getPartieFixeAnnuelle existe, sinon ça renverra 0 pour l'instant)
+    const partieFixe = typeof getPartieFixeAnnuelle === 'function' ? getPartieFixeAnnuelle(
         userSettings.vehicleType,
         userSettings.motorisation,
         userSettings.fiscalPower,
         userSettings.annualKm
-    );
+    ) : 0;
+    
     const totalAvecPartieFixe = baseTrajets + partieFixe;
 
-    // 2. CONSTRUCTION DU TABLEAU (Lignes)
+    // 2. CONSTRUCTION DU TABLEAU
     const data = [
         ['ROUTE NOTE - ' + currentUser.username.toUpperCase()],
         ['Généré le : ' + new Date().toLocaleString('fr-FR')],
@@ -1079,7 +1081,6 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         ['Date', 'Client', 'Début', 'Fin', 'Km Départ', 'Km Arrivée', 'Distance (km)', 'Paiement (€)', 'Notes']
     ];
 
-    // Ajout des livraisons
     deliveries.forEach(d => {
         data.push([
             d.date,
@@ -1094,30 +1095,33 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         ]);
     });
 
-    // Ligne des totaux du tableau principal
-    data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), baseTrajets.toFixed(2), '']);
-    data.push(['']); 
-    
-    // --- TABLEAU : DÉTAIL DU CALCUL ---
-    data.push(['DÉTAIL DU CALCUL FINANCIER', '']);
-    data.push(['Base trajets cumulée (km × tarif)', baseTrajets.toFixed(2) + ' €']);
-    data.push(['Forfait annuel (selon barème)', partieFixe.toFixed(2) + ' €']);
-    data.push(['TOTAL GLOBAL', totalAvecPartieFixe.toFixed(2) + ' €']);
+    // Ligne TOTAUX
     data.push(['']);
-
-    // --- TABLEAU : STATISTIQUES ---
-    data.push(['STATISTIQUES D\'ACTIVITÉ', '']);
-    data.push(['Nombre total de déplacements', deliveries.length]);
-    data.push(['Distance totale parcourue', totalKm.toFixed(0) + ' km']);
-    data.push(['Moyenne par trajet', (totalKm / deliveries.length).toFixed(0) + ' km']);
-
-    // Création de la feuille
-    const ws = XLSX.utils.aoa_to_sheet(data);
+    data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), baseTrajets.toFixed(2), '']);
     
-    // Largeur des colonnes optimisée
+    data.push(['']);
+    
+    // --- SECTION : DÉTAIL DU CALCUL FINANCIER ---
+    // Le texte va en colonne 0 (A), la valeur en colonne 4 (E). On fusionnera tout ça après.
+    data.push(['DÉTAIL DU CALCUL FINANCIER', '', '', '', '']); 
+    data.push(['Base trajets cumulée (km × tarif)', '', '', '', baseTrajets.toFixed(2) + ' €']);
+    data.push(['Forfait annuel (selon barème)', '', '', '', partieFixe.toFixed(2) + ' €']);
+    data.push(['TOTAL GLOBAL', '', '', '', totalAvecPartieFixe.toFixed(2) + ' €']);
+    
+    data.push(['']);
+    
+    // --- SECTION : STATISTIQUES D'ACTIVITÉ ---
+    data.push(['STATISTIQUES D\'ACTIVITÉ', '', '', '', '']);
+    data.push(['Nombre total de déplacements', '', '', '', deliveries.length]);
+    data.push(['Distance totale parcourue', '', '', '', totalKm.toFixed(0) + ' km']);
+    data.push(['Moyenne par trajet', '', '', '', (deliveries.length > 0 ? (totalKm / deliveries.length).toFixed(0) : 0) + ' km']);
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+
+    // Largeur des colonnes
     ws['!cols'] = [
-        { wch: 15 }, // A (Date / Labels)
-        { wch: 25 }, // B (Client / Valeurs)
+        { wch: 15 }, // A
+        { wch: 25 }, // B
         { wch: 10 }, // C
         { wch: 10 }, // D
         { wch: 12 }, // E
@@ -1127,7 +1131,7 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         { wch: 35 }  // I
     ];
 
-    // 3. DÉFINITION DES STYLES
+    // 3. STYLES AVANCÉS (Nécessite xlsx-js-style dans le HTML)
     const styles = {
         title: { font: { bold: true, size: 16, color: { rgb: "2563EB" } }, alignment: { horizontal: "center" } },
         subtitle: { font: { italic: true, size: 10, color: { rgb: "6B7280" } }, alignment: { horizontal: "center" } },
@@ -1139,32 +1143,32 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         },
         dataEven: { alignment: { horizontal: "center", vertical: "center" }, fill: { fgColor: { rgb: "F9FAFB" } }, border: { top: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}}, left: {style:"thin", color:{rgb:"E5E7EB"}}, right: {style:"thin", color:{rgb:"E5E7EB"}} } },
         dataOdd: { alignment: { horizontal: "center", vertical: "center" }, border: { top: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}}, left: {style:"thin", color:{rgb:"E5E7EB"}}, right: {style:"thin", color:{rgb:"E5E7EB"}} } },
-        totalTable: { font: { bold: true, size: 12 }, fill: { fgColor: { rgb: "DBEAFE" } }, alignment: { horizontal: "center" }, border: { top: {style:"medium", color:{rgb:"2563EB"}}, bottom: {style:"medium", color:{rgb:"2563EB"}} } },
+        totalRow: { font: { bold: true, size: 12 }, fill: { fgColor: { rgb: "DBEAFE" } }, alignment: { horizontal: "center", vertical: "center" }, border: { top: {style:"medium", color:{rgb:"2563EB"}}, bottom: {style:"medium", color:{rgb:"2563EB"}} } },
         
-        // Nouveaux styles pour les petits tableaux du bas
-        sectionHeader: { font: { bold: true, size: 12, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "4B5563" } }, alignment: { horizontal: "left" }, border: { bottom: {style:"medium"} } },
-        summaryLabel: { font: { bold: true }, alignment: { horizontal: "left" }, border: { left: {style:"thin"}, bottom: {style:"thin", color:{rgb:"E5E7EB"}} } },
-        summaryValue: { alignment: { horizontal: "right" }, border: { right: {style:"thin"}, bottom: {style:"thin", color:{rgb:"E5E7EB"}} } },
-        grandTotalLabel: { font: { bold: true, size: 13, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "10B981" } }, alignment: { horizontal: "left" } },
-        grandTotalValue: { font: { bold: true, size: 13, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "10B981" } }, alignment: { horizontal: "right" } }
+        // Styles pour les résumés en bas (Centrés et larges)
+        sectionTitle: { font: { bold: true, size: 12, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "4B5563" } }, alignment: { horizontal: "center", vertical: "center" } },
+        summaryLabel: { font: { bold: true, size: 11 }, alignment: { horizontal: "left", vertical: "center" }, border: { left: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}} } },
+        summaryValue: { font: { size: 11 }, alignment: { horizontal: "center", vertical: "center" }, border: { right: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}} } },
+        grandTotalLabel: { font: { bold: true, size: 13, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "10B981" } }, alignment: { horizontal: "left", vertical: "center" }, border: { left: {style:"thin", color:{rgb:"059669"}}, bottom: {style:"thin", color:{rgb:"059669"}} } },
+        grandTotalValue: { font: { bold: true, size: 13, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "10B981" } }, alignment: { horizontal: "center", vertical: "center" }, border: { right: {style:"thin", color:{rgb:"059669"}}, bottom: {style:"thin", color:{rgb:"059669"}} } }
     };
 
-    // 4. APPLICATION DES STYLES
+    // 4. APPLICATION DES STYLES ET FUSIONS
     const merges = [
         { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }, // Titre principal
         { s: { r: 1, c: 0 }, e: { r: 1, c: 8 } }  // Sous-titre
     ];
 
-    ws['A1'].s = styles.title;
-    ws['A2'].s = styles.subtitle;
+    if(ws['A1']) ws['A1'].s = styles.title;
+    if(ws['A2']) ws['A2'].s = styles.subtitle;
 
-    // En-têtes du grand tableau (Ligne 4 - index 3)
+    // Headers
     for (let c = 0; c < 9; c++) {
         const cell = XLSX.utils.encode_cell({r: 3, c: c});
         if (ws[cell]) ws[cell].s = styles.header;
     }
 
-    // Données du grand tableau
+    // Lignes de données
     let rowIdx = 4;
     for (let i = 0; i < deliveries.length; i++) {
         for (let c = 0; c < 9; c++) {
@@ -1174,59 +1178,78 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         rowIdx++;
     }
 
-    // Ligne TOTAUX (fusion des 6 premières colonnes)
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 5 } });
+    rowIdx++; // Ligne vide
+
+    // Ligne TOTAUX du grand tableau
+    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 5 } }); // fusion de A à F
     for (let c = 0; c < 9; c++) {
         const cell = XLSX.utils.encode_cell({r: rowIdx, c: c});
-        if (!ws[cell]) ws[cell] = { t: 's', v: '' }; // Créer cellule si vide
-        ws[cell].s = styles.totalTable;
+        if (!ws[cell]) ws[cell] = { t: 's', v: '' };
+        ws[cell].s = styles.totalRow;
     }
-    rowIdx += 2; // Saut de ligne
+    
+    rowIdx += 2; // Saut jusqu'au tableau DÉTAIL
 
-    // --- Rendu Tableau : Détail du calcul ---
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 1 } }); // Fusion titre section
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.sectionHeader;
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})] = { t: 's', v: '', s: styles.sectionHeader };
+    // --- Rendu Section DÉTAIL ---
+    // Titre
+    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 8 } }); // Fusionne sur toute la largeur
+    if (!ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})] = {t:'s', v:''};
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.sectionTitle;
     rowIdx++;
     
-    // Ligne 1 : Base
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.summaryLabel;
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})].s = styles.summaryValue;
-    rowIdx++;
-    
-    // Ligne 2 : Forfait
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.summaryLabel;
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})].s = styles.summaryValue;
-    rowIdx++;
+    // 3 lignes de détails
+    for(let i=0; i<3; i++) {
+        // Fusion A à D pour le label (très large)
+        merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 3 } });
+        // Fusion E à I pour la valeur (très large et centrée)
+        merges.push({ s: { r: rowIdx, c: 4 }, e: { r: rowIdx, c: 8 } });
+        
+        let isGrandTotal = (i === 2);
+        let lblStyle = isGrandTotal ? styles.grandTotalLabel : styles.summaryLabel;
+        let valStyle = isGrandTotal ? styles.grandTotalValue : styles.summaryValue;
 
-    // Ligne 3 : GRAND TOTAL
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.grandTotalLabel;
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})].s = styles.grandTotalValue;
-    rowIdx += 2;
-
-    // --- Rendu Tableau : Statistiques ---
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 1 } });
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.sectionHeader;
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})] = { t: 's', v: '', s: styles.sectionHeader };
-    rowIdx++;
-
-    for (let i = 0; i < 3; i++) {
-        ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.summaryLabel;
-        ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})].s = styles.summaryValue;
+        if(!ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]={t:'s',v:''};
+        ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = lblStyle;
+        
+        if(!ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})]={t:'s',v:''};
+        ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})].s = valStyle;
+        
         rowIdx++;
     }
 
-    // Appliquer les fusions
+    rowIdx++; // Ligne vide
+
+    // --- Rendu Section STATS ---
+    // Titre
+    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 8 } });
+    if (!ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})] = {t:'s', v:''};
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.sectionTitle;
+    rowIdx++;
+    
+    // 3 lignes de stats
+    for(let i=0; i<3; i++) {
+        merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 3 } });
+        merges.push({ s: { r: rowIdx, c: 4 }, e: { r: rowIdx, c: 8 } });
+        
+        if(!ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]={t:'s',v:''};
+        ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.summaryLabel;
+        
+        if(!ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})]={t:'s',v:''};
+        ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})].s = styles.summaryValue;
+        
+        rowIdx++;
+    }
+
     ws['!merges'] = merges;
 
-    // 5. GÉNÉRATION DU FICHIER
+    // 5. GÉNÉRATION
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
 
     const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, filename);
 
-    // Notification discrète
+    // Notification
     const successMsg = document.createElement('div');
     successMsg.style.cssText = `
         position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
