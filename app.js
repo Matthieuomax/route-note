@@ -1059,7 +1059,19 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         return;
     }
 
-    // Données
+    // 1. PRÉPARATION DES DONNÉES DE BASE
+    const totalKm = deliveries.reduce((sum, d) => sum + (d.distance || 0), 0);
+    const baseTrajets = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
+    
+    const partieFixe = getPartieFixeAnnuelle(
+        userSettings.vehicleType,
+        userSettings.motorisation,
+        userSettings.fiscalPower,
+        userSettings.annualKm
+    );
+    const totalAvecPartieFixe = baseTrajets + partieFixe;
+
+    // 2. CONSTRUCTION DU TABLEAU (Lignes)
     const data = [
         ['ROUTE NOTE - ' + currentUser.username.toUpperCase()],
         ['Généré le : ' + new Date().toLocaleString('fr-FR')],
@@ -1067,6 +1079,7 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         ['Date', 'Client', 'Début', 'Fin', 'Km Départ', 'Km Arrivée', 'Distance (km)', 'Paiement (€)', 'Notes']
     ];
 
+    // Ajout des livraisons
     deliveries.forEach(d => {
         data.push([
             d.date,
@@ -1081,128 +1094,132 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         ]);
     });
 
-    const totalKm = deliveries.reduce((sum, d) => sum + (d.distance || 0), 0);
-    const baseTrajets = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
-    
-    // Partie fixe annuelle
-    const partieFixe = getPartieFixeAnnuelle(
-        userSettings.vehicleType,
-        userSettings.motorisation,
-        userSettings.fiscalPower,
-        userSettings.annualKm
-    );
-    
-    const totalAvecPartieFixe = baseTrajets + partieFixe;
-    
-    data.push(['']);
+    // Ligne des totaux du tableau principal
     data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), baseTrajets.toFixed(2), '']);
+    data.push(['']); 
+    
+    // --- TABLEAU : DÉTAIL DU CALCUL ---
+    data.push(['DÉTAIL DU CALCUL FINANCIER', '']);
+    data.push(['Base trajets cumulée (km × tarif)', baseTrajets.toFixed(2) + ' €']);
+    data.push(['Forfait annuel (selon barème)', partieFixe.toFixed(2) + ' €']);
+    data.push(['TOTAL GLOBAL', totalAvecPartieFixe.toFixed(2) + ' €']);
     data.push(['']);
-    data.push(['DÉTAIL DU CALCUL']);
-    data.push(['Base trajets (km × tarif)', baseTrajets.toFixed(2) + ' €']);
-    data.push(['Partie fixe annuelle', partieFixe.toFixed(2) + ' €']);
-    data.push(['TOTAL AVEC PARTIE FIXE', totalAvecPartieFixe.toFixed(2) + ' €']);
-    data.push(['']);
-    data.push(['STATISTIQUES']);
-    data.push(['Nombre de déplacements', deliveries.length]);
-    data.push(['Distance totale', totalKm.toFixed(0) + ' km']);
+
+    // --- TABLEAU : STATISTIQUES ---
+    data.push(['STATISTIQUES D\'ACTIVITÉ', '']);
+    data.push(['Nombre total de déplacements', deliveries.length]);
+    data.push(['Distance totale parcourue', totalKm.toFixed(0) + ' km']);
     data.push(['Moyenne par trajet', (totalKm / deliveries.length).toFixed(0) + ' km']);
 
+    // Création de la feuille
     const ws = XLSX.utils.aoa_to_sheet(data);
     
-    // Largeur colonnes (une colonne en moins maintenant)
+    // Largeur des colonnes optimisée
     ws['!cols'] = [
-        { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 10 },
-        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 35 }
+        { wch: 15 }, // A (Date / Labels)
+        { wch: 25 }, // B (Client / Valeurs)
+        { wch: 10 }, // C
+        { wch: 10 }, // D
+        { wch: 12 }, // E
+        { wch: 12 }, // F
+        { wch: 14 }, // G
+        { wch: 14 }, // H
+        { wch: 35 }  // I
     ];
 
-    // STYLES PROFESSIONNELS
-    const headerStyle = {
-        font: { bold: true, color: { rgb: "FFFFFF" }, size: 12 },
-        fill: { fgColor: { rgb: "2563EB" } },
-        alignment: { horizontal: "center", vertical: "center" },
-        border: {
-            top: { style: "thin", color: { rgb: "000000" } },
-            bottom: { style: "thin", color: { rgb: "000000" } },
-            left: { style: "thin", color: { rgb: "000000" } },
-            right: { style: "thin", color: { rgb: "000000" } }
-        }
+    // 3. DÉFINITION DES STYLES
+    const styles = {
+        title: { font: { bold: true, size: 16, color: { rgb: "2563EB" } }, alignment: { horizontal: "center" } },
+        subtitle: { font: { italic: true, size: 10, color: { rgb: "6B7280" } }, alignment: { horizontal: "center" } },
+        header: { 
+            font: { bold: true, color: { rgb: "FFFFFF" }, size: 12 }, 
+            fill: { fgColor: { rgb: "2563EB" } }, 
+            alignment: { horizontal: "center", vertical: "center" },
+            border: { top: {style:"thin"}, bottom: {style:"thin"}, left: {style:"thin"}, right: {style:"thin"} }
+        },
+        dataEven: { alignment: { horizontal: "center", vertical: "center" }, fill: { fgColor: { rgb: "F9FAFB" } }, border: { top: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}}, left: {style:"thin", color:{rgb:"E5E7EB"}}, right: {style:"thin", color:{rgb:"E5E7EB"}} } },
+        dataOdd: { alignment: { horizontal: "center", vertical: "center" }, border: { top: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}}, left: {style:"thin", color:{rgb:"E5E7EB"}}, right: {style:"thin", color:{rgb:"E5E7EB"}} } },
+        totalTable: { font: { bold: true, size: 12 }, fill: { fgColor: { rgb: "DBEAFE" } }, alignment: { horizontal: "center" }, border: { top: {style:"medium", color:{rgb:"2563EB"}}, bottom: {style:"medium", color:{rgb:"2563EB"}} } },
+        
+        // Nouveaux styles pour les petits tableaux du bas
+        sectionHeader: { font: { bold: true, size: 12, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "4B5563" } }, alignment: { horizontal: "left" }, border: { bottom: {style:"medium"} } },
+        summaryLabel: { font: { bold: true }, alignment: { horizontal: "left" }, border: { left: {style:"thin"}, bottom: {style:"thin", color:{rgb:"E5E7EB"}} } },
+        summaryValue: { alignment: { horizontal: "right" }, border: { right: {style:"thin"}, bottom: {style:"thin", color:{rgb:"E5E7EB"}} } },
+        grandTotalLabel: { font: { bold: true, size: 13, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "10B981" } }, alignment: { horizontal: "left" } },
+        grandTotalValue: { font: { bold: true, size: 13, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "10B981" } }, alignment: { horizontal: "right" } }
     };
 
-    const titleStyle = {
-        font: { bold: true, size: 16, color: { rgb: "2563EB" } },
-        alignment: { horizontal: "center" }
-    };
-
-    const subtitleStyle = {
-        font: { italic: true, size: 10, color: { rgb: "6B7280" } },
-        alignment: { horizontal: "center" }
-    };
-
-    const totalStyle = {
-        font: { bold: true, size: 12 },
-        fill: { fgColor: { rgb: "FEF3C7" } },
-        alignment: { horizontal: "right" }
-    };
-
-    const dataStyle = {
-        alignment: { horizontal: "center", vertical: "center" },
-        border: {
-            top: { style: "thin", color: { rgb: "E5E7EB" } },
-            bottom: { style: "thin", color: { rgb: "E5E7EB" } },
-            left: { style: "thin", color: { rgb: "E5E7EB" } },
-            right: { style: "thin", color: { rgb: "E5E7EB" } }
-        }
-    };
-
-    const statsHeaderStyle = {
-        font: { bold: true, size: 12, color: { rgb: "FFFFFF" } },
-        fill: { fgColor: { rgb: "10B981" } },
-        alignment: { horizontal: "center" }
-    };
-
-    // Appliquer styles
-    // Titre
-    if (ws['A1']) ws['A1'].s = titleStyle;
-    // Sous-titre
-    if (ws['A2']) ws['A2'].s = subtitleStyle;
-    
-    // En-têtes (ligne 4) - 9 colonnes maintenant
-    for (let col = 0; col < 9; col++) {
-        const cell = String.fromCharCode(65 + col) + '4';
-        if (ws[cell]) ws[cell].s = headerStyle;
-    }
-
-    // Données (lignes 5 à 4+deliveries.length)
-    for (let row = 5; row <= 4 + deliveries.length; row++) {
-        for (let col = 0; col < 9; col++) {
-            const cell = String.fromCharCode(65 + col) + row;
-            if (ws[cell]) {
-                ws[cell].s = dataStyle;
-                // Alterner couleurs lignes
-                if (row % 2 === 0) {
-                    ws[cell].s.fill = { fgColor: { rgb: "F9FAFB" } };
-                }
-            }
-        }
-    }
-
-    // Ligne TOTAUX
-    const totalRow = 4 + deliveries.length + 2;
-    for (let col = 0; col < 9; col++) {
-        const cell = String.fromCharCode(65 + col) + totalRow;
-        if (ws[cell]) ws[cell].s = totalStyle;
-    }
-
-    // Statistiques
-    const statsRow = totalRow + 2;
-    if (ws['A' + statsRow]) ws['A' + statsRow].s = statsHeaderStyle;
-
-    // Fusion cellules titre - 9 colonnes
-    ws['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }, // Titre
+    // 4. APPLICATION DES STYLES
+    const merges = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }, // Titre principal
         { s: { r: 1, c: 0 }, e: { r: 1, c: 8 } }  // Sous-titre
     ];
 
+    ws['A1'].s = styles.title;
+    ws['A2'].s = styles.subtitle;
+
+    // En-têtes du grand tableau (Ligne 4 - index 3)
+    for (let c = 0; c < 9; c++) {
+        const cell = XLSX.utils.encode_cell({r: 3, c: c});
+        if (ws[cell]) ws[cell].s = styles.header;
+    }
+
+    // Données du grand tableau
+    let rowIdx = 4;
+    for (let i = 0; i < deliveries.length; i++) {
+        for (let c = 0; c < 9; c++) {
+            const cell = XLSX.utils.encode_cell({r: rowIdx, c: c});
+            if (ws[cell]) ws[cell].s = (rowIdx % 2 === 0) ? styles.dataEven : styles.dataOdd;
+        }
+        rowIdx++;
+    }
+
+    // Ligne TOTAUX (fusion des 6 premières colonnes)
+    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 5 } });
+    for (let c = 0; c < 9; c++) {
+        const cell = XLSX.utils.encode_cell({r: rowIdx, c: c});
+        if (!ws[cell]) ws[cell] = { t: 's', v: '' }; // Créer cellule si vide
+        ws[cell].s = styles.totalTable;
+    }
+    rowIdx += 2; // Saut de ligne
+
+    // --- Rendu Tableau : Détail du calcul ---
+    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 1 } }); // Fusion titre section
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.sectionHeader;
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})] = { t: 's', v: '', s: styles.sectionHeader };
+    rowIdx++;
+    
+    // Ligne 1 : Base
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.summaryLabel;
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})].s = styles.summaryValue;
+    rowIdx++;
+    
+    // Ligne 2 : Forfait
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.summaryLabel;
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})].s = styles.summaryValue;
+    rowIdx++;
+
+    // Ligne 3 : GRAND TOTAL
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.grandTotalLabel;
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})].s = styles.grandTotalValue;
+    rowIdx += 2;
+
+    // --- Rendu Tableau : Statistiques ---
+    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 1 } });
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.sectionHeader;
+    ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})] = { t: 's', v: '', s: styles.sectionHeader };
+    rowIdx++;
+
+    for (let i = 0; i < 3; i++) {
+        ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.summaryLabel;
+        ws[XLSX.utils.encode_cell({r: rowIdx, c: 1})].s = styles.summaryValue;
+        rowIdx++;
+    }
+
+    // Appliquer les fusions
+    ws['!merges'] = merges;
+
+    // 5. GÉNÉRATION DU FICHIER
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
 
