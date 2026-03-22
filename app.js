@@ -1247,19 +1247,49 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
 
     const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
-    XLSX.writeFile(wb, filename);
 
-    // Notification
-    const successMsg = document.createElement('div');
-    successMsg.style.cssText = `
-        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-        background: linear-gradient(135deg, #10b981, #059669); color: white;
-        padding: 16px 24px; border-radius: 12px; font-weight: 600;
-        box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4); z-index: 9999;
-    `;
-    successMsg.textContent = '✅ Fichier Excel téléchargé !';
-    document.body.appendChild(successMsg);
-    setTimeout(() => successMsg.remove(), 3000);
+    // Fonction pour afficher notre notification stylée
+    const notifyUser = (message) => {
+        const msgDiv = document.createElement('div');
+        msgDiv.style.cssText = `
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            background: linear-gradient(135deg, #10b981, #059669); color: white;
+            padding: 16px 24px; border-radius: 12px; font-weight: 600;
+            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4); z-index: 9999;
+            text-align: center; width: 80%; max-width: 350px;
+        `;
+        msgDiv.innerHTML = message;
+        document.body.appendChild(msgDiv);
+        setTimeout(() => msgDiv.remove(), 4500); // Reste affiché 4.5 secondes
+    };
+
+    // On prépare le fichier pour le mobile
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const file = new File([blob], filename, { type: blob.type });
+
+    // On demande à l'utilisateur ce qu'il préfère
+    const userChoice = confirm("Comment voulez-vous enregistrer le fichier ?\n\n[OK] = Choisir mon dossier moi-même\n[Annuler] = Téléchargement rapide (dossier par défaut)");
+
+    if (userChoice) {
+        // L'utilisateur veut CHOISIR LE DOSSIER (Ouverture du menu de partage natif)
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            navigator.share({
+                files: [file],
+                title: 'Export Route Note'
+            })
+            .then(() => notifyUser('✅ Export réussi !'))
+            .catch((error) => console.log('Partage annulé', error));
+        } else {
+            alert("⚠️ Votre appareil ne permet pas de choisir le dossier. Téléchargement classique en cours...");
+            XLSX.writeFile(wb, filename);
+            notifyUser('✅ Fichier téléchargé !<br><small>Regardez dans le dossier Téléchargements de votre appareil.</small>');
+        }
+    } else {
+        // L'utilisateur veut le TÉLÉCHARGEMENT DIRECT
+        XLSX.writeFile(wb, filename);
+        notifyUser('✅ Fichier téléchargé !<br><small>Vérifiez votre dossier "Téléchargements" ou "Fichiers".</small>');
+    }
 });
 
 // ===== NAVIGATION =====
