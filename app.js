@@ -1246,7 +1246,7 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
 
-    const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
+	const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
     // Fonction pour afficher notre notification stylée
     const notifyUser = (message) => {
@@ -1260,20 +1260,23 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         `;
         msgDiv.innerHTML = message;
         document.body.appendChild(msgDiv);
-        setTimeout(() => msgDiv.remove(), 4500); // Reste affiché 4.5 secondes
+        setTimeout(() => msgDiv.remove(), 4500);
     };
 
-    // On prépare le fichier pour le mobile
+    // Détection : Est-ce un appareil mobile (téléphone/tablette) ?
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+    // Préparation du fichier pour le partage mobile
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const file = new File([blob], filename, { type: blob.type });
 
-    // On demande à l'utilisateur ce qu'il préfère
-    const userChoice = confirm("Comment voulez-vous enregistrer le fichier ?\n\n[OK] = Choisir mon dossier moi-même\n[Annuler] = Téléchargement rapide (dossier par défaut)");
+    // LOGIQUE DE TÉLÉCHARGEMENT
+    if (isMobile && navigator.canShare && navigator.canShare({ files: [file] })) {
+        // --- COMPORTEMENT MOBILE ---
+        const userChoice = confirm("Comment voulez-vous enregistrer le fichier ?\n\n[OK] = Choisir mon dossier (Partager)\n[Annuler] = Téléchargement rapide");
 
-    if (userChoice) {
-        // L'utilisateur veut CHOISIR LE DOSSIER (Ouverture du menu de partage natif)
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        if (userChoice) {
             navigator.share({
                 files: [file],
                 title: 'Export Route Note'
@@ -1281,14 +1284,14 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
             .then(() => notifyUser('✅ Export réussi !'))
             .catch((error) => console.log('Partage annulé', error));
         } else {
-            alert("⚠️ Votre appareil ne permet pas de choisir le dossier. Téléchargement classique en cours...");
             XLSX.writeFile(wb, filename);
-            notifyUser('✅ Fichier téléchargé !<br><small>Regardez dans le dossier Téléchargements de votre appareil.</small>');
+            notifyUser('✅ Fichier téléchargé !<br><small>Vérifiez votre dossier "Téléchargements".</small>');
         }
     } else {
-        // L'utilisateur veut le TÉLÉCHARGEMENT DIRECT
+        // --- COMPORTEMENT PC / MAC ---
+        // Sur ordinateur, on lance directement le téléchargement classique
         XLSX.writeFile(wb, filename);
-        notifyUser('✅ Fichier téléchargé !<br><small>Vérifiez votre dossier "Téléchargements" ou "Fichiers".</small>');
+        notifyUser('✅ Fichier téléchargé !<br><small>Regardez dans votre dossier Téléchargements.</small>');
     }
 });
 
