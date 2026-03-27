@@ -12,11 +12,10 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     
     <!-- SDK Supabase -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase-js.min.js"></script>
     
     <!-- XLSX pour export Excel -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     
     <link rel="stylesheet" href="styles.css">
     
@@ -126,7 +125,7 @@
             <form id="loginForm">
                 <div class="form-group">
                     <label class="form-label">Prénom ou pseudo</label>
-                    <input type="text" class="form-input" id="loginUsername" required autocomplete="username" placeholder="Ex: Jean, Marie...">
+                    <input type="text" class="form-input" id="loginUsername" required autocomplete="username" placeholder="Pseudo...">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Mot de passe</label>
@@ -136,9 +135,6 @@
                 <button type="button" class="btn btn-secondary" id="switchToRegister">Créer un compte</button>
             </form>
             
-            <div class="auth-info">
-                📱 Fonctionne hors ligne avec synchronisation automatique
-            </div>
         </div>
     </div>
 
