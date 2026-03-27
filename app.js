@@ -1,7 +1,14 @@
 // ================================
 // ROUTE NOTE - PWA JavaScript
-// Version complète avec géolocalisation
+// Version avec Supabase + LocalStorage hybride
 // ================================
+
+// ===== CONFIGURATION SUPABASE =====
+const SUPABASE_URL = 'https://picyuqnjhjmmomxxcgrg.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpY3l1cW5qaGptbW9teHhjZ3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1NTcxNDEsImV4cCI6MjA5MDEzMzE0MX0.9IypoAHc5Z1z2j3BIT6FQQOZtoak-KJ7beoPgjtji20';
+
+// Client Supabase (sera initialisé après chargement du SDK)
+let supabase = null;
 
 // ===== ENREGISTREMENT SERVICE WORKER =====
 if ('serviceWorker' in navigator) {
@@ -12,48 +19,39 @@ if ('serviceWorker' in navigator) {
     });
 }
 
-// ===== SYSTÈME DE STOCKAGE LOCAL =====
-class LocalStorage {
-    static getUsers() {
+// ===== INITIALISATION SUPABASE =====
+function initSupabase() {
+    if (window.supabase) {
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        console.log('✅ Supabase initialisé');
+        return true;
+    }
+    console.warn('⚠️ SDK Supabase non chargé, mode hors ligne');
+    return false;
+}
+
+// ===== SYSTÈME DE STOCKAGE HYBRIDE =====
+class HybridStorage {
+    // ===== LOCAL STORAGE (Cache/Offline) =====
+    static getLocalUsers() {
         return JSON.parse(localStorage.getItem('users') || '{}');
     }
 
-    static saveUsers(users) {
+    static saveLocalUsers(users) {
         localStorage.setItem('users', JSON.stringify(users));
     }
 
-    static createUser(username, password) {
-        const users = this.getUsers();
-        if (users[username]) {
-            throw new Error('Cet identifiant existe déjà');
-        }
-        users[username] = {
-            password: btoa(password),
-            createdAt: new Date().toISOString()
-        };
-        this.saveUsers(users);
-    }
-
-    static verifyUser(username, password) {
-        const users = this.getUsers();
-        const user = users[username];
-        if (!user || user.password !== btoa(password)) {
-            throw new Error('Identifiant ou mot de passe incorrect');
-        }
-        return { username };
-    }
-
-    static getDeliveries(username) {
+    static getLocalDeliveries(username) {
         const key = `deliveries_${username}`;
         return JSON.parse(localStorage.getItem(key) || '[]');
     }
 
-    static saveDeliveries(username, deliveries) {
+    static saveLocalDeliveries(username, deliveries) {
         const key = `deliveries_${username}`;
         localStorage.setItem(key, JSON.stringify(deliveries));
     }
 
-    static getSettings(username) {
+    static getLocalSettings(username) {
         const key = `settings_${username}`;
         const defaults = { 
             vehicleType: 'auto',
@@ -65,9 +63,393 @@ class LocalStorage {
         return JSON.parse(localStorage.getItem(key) || JSON.stringify(defaults));
     }
 
-    static saveSettings(username, settings) {
+    static saveLocalSettings(username, settings) {
         const key = `settings_${username}`;
         localStorage.setItem(key, JSON.stringify(settings));
+    }
+
+    // ===== SUPABASE AUTH =====
+    static async signUp(email, password, username) {
+        if (!supabase) throw new Error('Mode hors ligne - inscription impossible');
+        
+        const { data, error } = await supabase.auth.signUp({
+            email: email,
+            password: password,
+            options: {
+                data: { username: username }
+            }
+        });
+        
+        if (error) throw error;
+        
+        // Sauvegarder aussi en local pour le mode offline
+        const users = this.getLocalUsers();
+        users[username] = {
+            email: email,
+            password: btoa(password),
+            supabaseId: data.user?.id,
+            createdAt: new Date().toISOString()
+        };
+        this.saveLocalUsers(users);
+        
+        return data;
+    }
+
+    static async signIn(emailOrUsername, password) {
+        // Essayer d'abord Supabase
+        if (supabase) {
+            try {
+                // Déterminer si c'est un email ou username
+                let email = emailOrUsername;
+                if (!emailOrUsername.includes('@')) {
+                    // C'est un username, chercher l'email en local
+                    const users = this.getLocalUsers();
+                    if (users[emailOrUsername]?.email) {
+                        email = users[emailOrUsername].email;
+                    } else {
+                        // Pas d'email trouvé, essayer en mode local uniquement
+                        throw new Error('Username sans email associé');
+                    }
+                }
+
+                const { data, error } = await supabase.auth.signInWithPassword({
+                    email: email,
+                    password: password
+                });
+                
+                if (error) throw error;
+                
+                // Récupérer le profil depuis Supabase
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', data.user.id)
+                    .single();
+                
+                const username = profile?.username || emailOrUsername.split('@')[0];
+                
+                // Mettre à jour le cache local
+                const users = this.getLocalUsers();
+                users[username] = {
+                    email: email,
+                    password: btoa(password),
+                    supabaseId: data.user.id,
+                    createdAt: users[username]?.createdAt || new Date().toISOString()
+                };
+                this.saveLocalUsers(users);
+                
+                // Sync les settings depuis Supabase
+                if (profile) {
+                    const settings = {
+                        vehicleType: profile.vehicle_type || 'auto',
+                        motorisation: profile.motorisation || 'thermique',
+                        fiscalPower: profile.fiscal_power || 'cv4',
+                        annualKm: profile.annual_km || 'tranche2',
+                        theme: profile.theme || 'blue'
+                    };
+                    this.saveLocalSettings(username, settings);
+                }
+                
+                // Sync les livraisons depuis Supabase
+                await this.syncDeliveriesFromCloud(username, data.user.id);
+                
+                return { 
+                    user: data.user, 
+                    username: username,
+                    isOnline: true 
+                };
+                
+            } catch (error) {
+                console.warn('⚠️ Connexion Supabase échouée, essai local:', error.message);
+            }
+        }
+        
+        // Fallback : connexion locale
+        return this.signInLocal(emailOrUsername, password);
+    }
+
+    static signInLocal(username, password) {
+        const users = this.getLocalUsers();
+        const user = users[username];
+        
+        if (!user || user.password !== btoa(password)) {
+            throw new Error('Identifiant ou mot de passe incorrect');
+        }
+        
+        return { 
+            user: { id: user.supabaseId || username },
+            username: username,
+            isOnline: false 
+        };
+    }
+
+    static async signOut() {
+        if (supabase) {
+            await supabase.auth.signOut();
+        }
+        localStorage.removeItem('currentUser');
+    }
+
+    // ===== SYNC DELIVERIES =====
+    static async syncDeliveriesFromCloud(username, userId) {
+        if (!supabase || !userId) return;
+        
+        try {
+            const { data: cloudDeliveries, error } = await supabase
+                .from('deliveries')
+                .select('*')
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false });
+            
+            if (error) throw error;
+            
+            // Convertir format Supabase vers format local
+            const localFormat = cloudDeliveries.map(d => ({
+                id: d.local_id || d.id,
+                date: d.date,
+                clientName: d.client_name,
+                startTime: d.start_time,
+                endTime: d.end_time,
+                startKm: d.start_km,
+                endKm: d.end_km,
+                distance: d.distance,
+                payment: d.payment,
+                vehicleConfig: d.vehicle_config,
+                notes: d.notes,
+                createdAt: d.created_at,
+                supabaseId: d.id,
+                synced: true
+            }));
+            
+            // Fusionner avec les données locales non synchronisées
+            const localDeliveries = this.getLocalDeliveries(username);
+            const unsyncedLocal = localDeliveries.filter(d => !d.synced);
+            
+            // Combiner : cloud + local non synchronisé
+            const merged = [...localFormat];
+            for (const local of unsyncedLocal) {
+                if (!merged.find(d => d.id === local.id)) {
+                    merged.push(local);
+                }
+            }
+            
+            // Trier par date décroissante
+            merged.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            
+            this.saveLocalDeliveries(username, merged);
+            console.log(`✅ Sync: ${cloudDeliveries.length} trajets récupérés du cloud`);
+            
+        } catch (error) {
+            console.error('❌ Erreur sync cloud:', error);
+        }
+    }
+
+    static async syncDeliveriesToCloud(username) {
+        if (!supabase) return;
+        
+        const session = await supabase.auth.getSession();
+        const userId = session?.data?.session?.user?.id;
+        
+        if (!userId) return;
+        
+        const localDeliveries = this.getLocalDeliveries(username);
+        const unsynced = localDeliveries.filter(d => !d.synced);
+        
+        if (unsynced.length === 0) return;
+        
+        console.log(`📤 Synchronisation de ${unsynced.length} trajets vers le cloud...`);
+        
+        for (const delivery of unsynced) {
+            try {
+                const cloudData = {
+                    user_id: userId,
+                    local_id: delivery.id,
+                    date: delivery.date,
+                    client_name: delivery.clientName,
+                    start_time: delivery.startTime || null,
+                    end_time: delivery.endTime || null,
+                    start_km: delivery.startKm || 0,
+                    end_km: delivery.endKm || 0,
+                    distance: delivery.distance || 0,
+                    payment: delivery.payment || 0,
+                    vehicle_config: delivery.vehicleConfig || {},
+                    notes: delivery.notes || null
+                };
+                
+                const { data, error } = await supabase
+                    .from('deliveries')
+                    .upsert(cloudData, { 
+                        onConflict: 'user_id,local_id',
+                        ignoreDuplicates: false 
+                    })
+                    .select()
+                    .single();
+                
+                if (error) throw error;
+                
+                // Marquer comme synchronisé
+                delivery.synced = true;
+                delivery.supabaseId = data.id;
+                
+            } catch (error) {
+                console.error('❌ Erreur sync trajet:', error);
+            }
+        }
+        
+        this.saveLocalDeliveries(username, localDeliveries);
+        console.log('✅ Synchronisation terminée');
+    }
+
+    static async saveDelivery(username, delivery) {
+        // Toujours sauvegarder en local d'abord
+        const deliveries = this.getLocalDeliveries(username);
+        
+        // Marquer comme non synchronisé
+        delivery.synced = false;
+        
+        // Ajouter ou mettre à jour
+        const existingIndex = deliveries.findIndex(d => d.id === delivery.id);
+        if (existingIndex >= 0) {
+            deliveries[existingIndex] = delivery;
+        } else {
+            deliveries.unshift(delivery);
+        }
+        
+        this.saveLocalDeliveries(username, deliveries);
+        
+        // Tenter de sync vers le cloud en arrière-plan
+        this.syncDeliveriesToCloud(username).catch(console.error);
+        
+        return delivery;
+    }
+
+    static async deleteDelivery(username, deliveryId) {
+        // Supprimer en local
+        let deliveries = this.getLocalDeliveries(username);
+        const toDelete = deliveries.find(d => d.id === deliveryId);
+        deliveries = deliveries.filter(d => d.id !== deliveryId);
+        this.saveLocalDeliveries(username, deliveries);
+        
+        // Supprimer du cloud si synchronisé
+        if (supabase && toDelete?.supabaseId) {
+            try {
+                await supabase
+                    .from('deliveries')
+                    .delete()
+                    .eq('id', toDelete.supabaseId);
+            } catch (error) {
+                console.error('❌ Erreur suppression cloud:', error);
+            }
+        }
+    }
+
+    // ===== SYNC SETTINGS =====
+    static async saveSettings(username, settings) {
+        // Toujours sauvegarder en local
+        this.saveLocalSettings(username, settings);
+        
+        // Sync vers Supabase si connecté
+        if (supabase) {
+            try {
+                const session = await supabase.auth.getSession();
+                const userId = session?.data?.session?.user?.id;
+                
+                if (userId) {
+                    await supabase
+                        .from('profiles')
+                        .update({
+                            vehicle_type: settings.vehicleType,
+                            motorisation: settings.motorisation,
+                            fiscal_power: settings.fiscalPower,
+                            annual_km: settings.annualKm,
+                            theme: settings.theme
+                        })
+                        .eq('id', userId);
+                }
+            } catch (error) {
+                console.error('❌ Erreur sync settings:', error);
+            }
+        }
+    }
+
+    // ===== MIGRATION DES DONNÉES EXISTANTES =====
+    static async migrateExistingData(username) {
+        if (!supabase) return;
+        
+        const session = await supabase.auth.getSession();
+        const userId = session?.data?.session?.user?.id;
+        
+        if (!userId) return;
+        
+        const localDeliveries = this.getLocalDeliveries(username);
+        const unsynced = localDeliveries.filter(d => !d.synced && !d.supabaseId);
+        
+        if (unsynced.length > 0) {
+            console.log(`🔄 Migration de ${unsynced.length} trajets existants...`);
+            await this.syncDeliveriesToCloud(username);
+        }
+    }
+}
+
+// ===== ÉTAT DE CONNEXION =====
+class ConnectionStatus {
+    static isOnline() {
+        return navigator.onLine;
+    }
+
+    static init() {
+        window.addEventListener('online', () => {
+            console.log('📶 Connexion rétablie');
+            this.showStatus('online');
+            // Synchroniser les données en attente
+            if (currentUser) {
+                HybridStorage.syncDeliveriesToCloud(currentUser.username);
+            }
+        });
+
+        window.addEventListener('offline', () => {
+            console.log('📴 Mode hors ligne');
+            this.showStatus('offline');
+        });
+    }
+
+    static showStatus(status) {
+        // Créer ou mettre à jour l'indicateur de statut
+        let indicator = document.getElementById('connectionStatus');
+        
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'connectionStatus';
+            indicator.style.cssText = `
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                padding: 8px 16px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+                z-index: 9999;
+                transition: all 0.3s ease;
+                opacity: 0;
+            `;
+            document.body.appendChild(indicator);
+        }
+
+        if (status === 'online') {
+            indicator.textContent = '📶 En ligne';
+            indicator.style.background = 'linear-gradient(135deg, #d1fae5, #10b981)';
+            indicator.style.color = '#065f46';
+        } else {
+            indicator.textContent = '📴 Hors ligne';
+            indicator.style.background = 'linear-gradient(135deg, #fee2e2, #ef4444)';
+            indicator.style.color = '#991b1b';
+        }
+
+        indicator.style.opacity = '1';
+        
+        setTimeout(() => {
+            indicator.style.opacity = '0';
+        }, 3000);
     }
 }
 
@@ -178,14 +560,12 @@ const BAREME_KM = {
 };
 
 // ===== CALCUL INDEMNITÉ =====
-// Calcul pour UN TRAJET (juste multiplication, sans partie fixe)
 function calculateIndemnitePourTrajet(distance, vehicleType, motorisation, fiscalPower, annualKm) {
     const key = `${vehicleType}_${motorisation}`;
     const bareme = BAREME_KM[key];
     
     if (!bareme) return 0;
     
-    // Déterminer la puissance fiscale
     let powerKey = fiscalPower;
     if (vehicleType === 'cyclo') {
         powerKey = 'unique';
@@ -194,22 +574,17 @@ function calculateIndemnitePourTrajet(distance, vehicleType, motorisation, fisca
     const tranches = bareme[powerKey];
     if (!tranches) return 0;
     
-    // Sélectionner la bonne tranche selon kilométrage annuel
     const tranche = tranches[annualKm];
     if (!tranche) return 0;
     
-    // Pour tranche 1 et 3 : juste multiplication
-    // Pour tranche 2 : extraire le coefficient (sans la partie fixe)
     if (annualKm === 'tranche1' || annualKm === 'tranche3') {
         return tranche.calc(distance);
     } else {
-        // Tranche 2 : extraire coefficient de multiplication
         const coef = getCoefMultiplication(vehicleType, motorisation, powerKey);
         return distance * coef;
     }
 }
 
-// Récupérer coefficient de multiplication pour tranche 2
 function getCoefMultiplication(vehicleType, motorisation, powerKey) {
     const coefficients = {
         auto_thermique: { cv3: 0.316, cv4: 0.340, cv5: 0.357, cv6: 0.374, cv7: 0.394 },
@@ -224,7 +599,6 @@ function getCoefMultiplication(vehicleType, motorisation, powerKey) {
     return coefficients[key]?.[powerKey] || 0;
 }
 
-// Récupérer partie fixe annuelle (pour tranche 2 uniquement)
 function getPartieFixeAnnuelle(vehicleType, motorisation, fiscalPower, annualKm) {
     if (annualKm !== 'tranche2') return 0;
     
@@ -277,59 +651,126 @@ const loginForm = document.getElementById('loginForm');
 const authError = document.getElementById('authError');
 const authSuccess = document.getElementById('authSuccess');
 
-// ===== VÉRIFICATION UTILISATEUR CONNECTÉ =====
-const savedUser = localStorage.getItem('currentUser');
-if (savedUser) {
-    currentUser = JSON.parse(savedUser);
-    loadUserData();
-    showApp();
-    // Forcer re-calcul partie fixe après rendu DOM complet
-    setTimeout(() => updateUI(), 0);
-}
+// ===== INITIALISATION =====
+document.addEventListener('DOMContentLoaded', async () => {
+    // Initialiser Supabase
+    initSupabase();
+    
+    // Initialiser le monitoring de connexion
+    ConnectionStatus.init();
+    
+    // Vérifier si utilisateur déjà connecté
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+        currentUser = JSON.parse(savedUser);
+        await loadUserData();
+        showApp();
+        setTimeout(() => updateUI(), 0);
+        
+        // Tenter une sync en arrière-plan
+        if (supabase && ConnectionStatus.isOnline()) {
+            HybridStorage.syncDeliveriesToCloud(currentUser.username).catch(console.error);
+        }
+    }
+});
 
 // ===== INSCRIPTION =====
-document.getElementById('switchToRegister').addEventListener('click', () => {
-    const username = prompt('Choisissez un identifiant :');
-    if (!username || username.trim() === '') return;
+document.getElementById('switchToRegister').addEventListener('click', async () => {
+    // Afficher le formulaire d'inscription
+    const email = prompt('Entrez votre email :');
+    if (!email || !email.includes('@')) {
+        showError('Email invalide');
+        return;
+    }
 
-    const password = prompt('Choisissez un mot de passe (min 4 caractères) :');
-    if (!password || password.length < 4) {
-        showError('Le mot de passe doit contenir au moins 4 caractères');
+    const username = prompt('Choisissez un identifiant :');
+    if (!username || username.trim() === '') {
+        showError('Identifiant requis');
+        return;
+    }
+
+    const password = prompt('Choisissez un mot de passe (min 6 caractères) :');
+    if (!password || password.length < 6) {
+        showError('Le mot de passe doit contenir au moins 6 caractères');
         return;
     }
 
     try {
-        LocalStorage.createUser(username.trim(), password);
-        showSuccess('Compte créé ! Vous pouvez maintenant vous connecter.');
+        if (supabase && ConnectionStatus.isOnline()) {
+            await HybridStorage.signUp(email, password, username.trim());
+            showSuccess('Compte créé ! Vérifiez votre email pour confirmer, puis connectez-vous.');
+        } else {
+            // Mode hors ligne : création locale uniquement
+            const users = HybridStorage.getLocalUsers();
+            if (users[username.trim()]) {
+                throw new Error('Cet identifiant existe déjà');
+            }
+            users[username.trim()] = {
+                email: email,
+                password: btoa(password),
+                createdAt: new Date().toISOString(),
+                localOnly: true
+            };
+            HybridStorage.saveLocalUsers(users);
+            showSuccess('Compte créé en mode hors ligne. Reconnectez-vous quand vous aurez internet pour synchroniser.');
+        }
     } catch (error) {
         showError(error.message);
     }
 });
 
 // ===== CONNEXION =====
-loginForm.addEventListener('submit', (e) => {
+loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     hideMessages();
 
-    const username = document.getElementById('loginUsername').value.trim();
+    const emailOrUsername = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value;
 
+    // Afficher un indicateur de chargement
+    const submitBtn = loginForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Connexion...';
+    submitBtn.disabled = true;
+
     try {
-        const user = LocalStorage.verifyUser(username, password);
-        currentUser = user;
-        localStorage.setItem('currentUser', JSON.stringify(user));
-        loadUserData();
+        const result = await HybridStorage.signIn(emailOrUsername, password);
+        
+        currentUser = {
+            username: result.username,
+            id: result.user.id,
+            isOnline: result.isOnline
+        };
+        
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        await loadUserData();
         showApp();
+        
+        // Afficher un message selon le mode
+        if (result.isOnline) {
+            ConnectionStatus.showStatus('online');
+        } else {
+            ConnectionStatus.showStatus('offline');
+        }
+        
     } catch (error) {
         showError(error.message);
+    } finally {
+        submitBtn.textContent = originalText;
+        submitBtn.disabled = false;
     }
 });
 
 // ===== DÉCONNEXION =====
-document.getElementById('logoutBtn').addEventListener('click', () => {
+document.getElementById('logoutBtn').addEventListener('click', async () => {
     if (confirm('Voulez-vous vraiment vous déconnecter ?')) {
+        // Synchroniser avant déconnexion si possible
+        if (currentUser && supabase && ConnectionStatus.isOnline()) {
+            await HybridStorage.syncDeliveriesToCloud(currentUser.username);
+        }
+        
+        await HybridStorage.signOut();
         currentUser = null;
-        localStorage.removeItem('currentUser');
         showAuth();
     }
 });
@@ -356,7 +797,7 @@ function showError(message) {
 function showSuccess(message) {
     authSuccess.textContent = message;
     authSuccess.classList.remove('hidden');
-    setTimeout(() => authSuccess.classList.add('hidden'), 3000);
+    setTimeout(() => authSuccess.classList.add('hidden'), 5000);
 }
 
 function hideMessages() {
@@ -365,13 +806,13 @@ function hideMessages() {
 }
 
 // ===== CHARGEMENT DONNÉES UTILISATEUR =====
-function loadUserData() {
-    userSettings = LocalStorage.getSettings(currentUser.username);
-    deliveries = LocalStorage.getDeliveries(currentUser.username);
+async function loadUserData() {
+    userSettings = HybridStorage.getLocalSettings(currentUser.username);
+    deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
 }
 
-function saveSettings() {
-    LocalStorage.saveSettings(currentUser.username, userSettings);
+async function saveSettings() {
+    await HybridStorage.saveSettings(currentUser.username, userSettings);
 }
 
 // ===== MISE À JOUR UI =====
@@ -389,7 +830,6 @@ function updateUI() {
     const baseTrajets = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
     const avgKm = deliveries.length > 0 ? totalKm / deliveries.length : 0;
     
-    // Calculer partie fixe annuelle
     const partieFixe = getPartieFixeAnnuelle(
         userSettings.vehicleType,
         userSettings.motorisation,
@@ -397,10 +837,8 @@ function updateUI() {
         userSettings.annualKm
     );
     
-    // Total avec partie fixe
     const totalAvecPartieFixe = baseTrajets + partieFixe;
 
-    // Mise à jour label "Total annuel" si pas encore fait
     const totalLabel = document.querySelector('#totalPayment')?.closest('.stat-card')?.querySelector('.stat-label');
     if (totalLabel) totalLabel.textContent = 'Total annuel';
     
@@ -412,13 +850,11 @@ function updateUI() {
     document.getElementById('avgKm').textContent = avgKm.toFixed(1) + ' km';
     document.getElementById('deliveryCount').textContent = deliveries.length + ' trajets';
 
-    // Mettre à jour l'interface des paramètres véhicule
     updateVehicleSettings();
     renderDeliveries();
 }
 
 function updateVehicleSettings() {
-    // Mettre à jour les sélections dans l'interface
     document.querySelectorAll('input[name="vehicleType"]').forEach(input => {
         input.checked = input.value === userSettings.vehicleType;
     });
@@ -432,19 +868,14 @@ function updateVehicleSettings() {
     const annualKmSelect = document.getElementById('annualKm');
     if (annualKmSelect) annualKmSelect.value = userSettings.annualKm;
     
-    // Mettre à jour options selon type véhicule
     updateKmRanges();
     updateFiscalPowerOptions();
-    
-    // Afficher le tarif calculé
     displayCalculatedRate();
 }
 
 function displayCalculatedRate() {
-    // Calculer moyenne sur distance représentative
     const kmReference = (userSettings.vehicleType === 'auto') ? 12500 : 4500;
     
-    // Calcul total avec partie fixe
     const baseKm = calculateIndemnitePourTrajet(
         kmReference, 
         userSettings.vehicleType, 
@@ -469,10 +900,7 @@ function displayCalculatedRate() {
     }
 }
 
-function updatePresetButtons() {
-    // Cette fonction n'est plus nécessaire avec le barème
-    // On la garde vide pour éviter les erreurs
-}
+function updatePresetButtons() {}
 
 // ===== AFFICHAGE LIVRAISONS =====
 function renderDeliveries() {
@@ -490,10 +918,13 @@ function renderDeliveries() {
     }
 
     container.innerHTML = deliveries.map(delivery => `
-        <div class="delivery-card">
+        <div class="delivery-card ${delivery.synced ? '' : 'unsynced'}">
             <div class="delivery-header">
                 <div style="flex:1;">
-                    <div class="delivery-client">📦 ${delivery.clientName}</div>
+                    <div class="delivery-client">
+                        📦 ${delivery.clientName}
+                        ${!delivery.synced ? '<span class="sync-badge" title="Non synchronisé">⏳</span>' : ''}
+                    </div>
                     <div class="delivery-date">${formatDate(delivery.date)}</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
@@ -518,10 +949,11 @@ function formatDate(dateString) {
 }
 
 // ===== SUPPRESSION D'UN TRAJET =====
-function deleteDelivery(id) {
+async function deleteDelivery(id) {
     if (!confirm('Supprimer ce trajet ?')) return;
-    deliveries = deliveries.filter(d => d.id !== id);
-    LocalStorage.saveDeliveries(currentUser.username, deliveries);
+    
+    await HybridStorage.deleteDelivery(currentUser.username, id);
+    deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
     updateUI();
 }
 
@@ -567,8 +999,6 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
         } else {
             document.getElementById('deliveryForm').classList.add('hidden');
             document.getElementById('autoModeContainer').classList.remove('hidden');
-            
-            // Demander permission GPS dès le passage en mode automatique
             requestGPSPermission();
         }
     });
@@ -581,14 +1011,12 @@ function requestGPSPermission() {
         return;
     }
     
-    // Demande silencieuse de permission
     navigator.geolocation.getCurrentPosition(
         () => {
             console.log('✅ Permission GPS accordée');
         },
         (error) => {
             if (error.code === error.PERMISSION_DENIED) {
-                // Afficher message avec chemin iOS
                 setTimeout(() => {
                     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
                     const message = isIOS 
@@ -628,7 +1056,7 @@ function calculateDelivery() {
 }
 
 // ===== SOUMISSION LIVRAISON MANUELLE =====
-document.getElementById('deliveryForm').addEventListener('submit', (e) => {
+document.getElementById('deliveryForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const clientName = document.getElementById('deliveryClient').value.trim();
@@ -676,11 +1104,12 @@ document.getElementById('deliveryForm').addEventListener('submit', (e) => {
             annualKm: userSettings.annualKm
         },
         notes: document.getElementById('deliveryNotes').value.trim(),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        synced: false
     };
 
-    deliveries.unshift(delivery);
-    LocalStorage.saveDeliveries(currentUser.username, deliveries);
+    await HybridStorage.saveDelivery(currentUser.username, delivery);
+    deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
     
     updateUI();
     document.getElementById('deliveryFormContainer').classList.add('hidden');
@@ -688,8 +1117,31 @@ document.getElementById('deliveryForm').addEventListener('submit', (e) => {
     document.getElementById('deliveryForm').reset();
     document.getElementById('deliveryDate').value = new Date().toISOString().split('T')[0];
     
-    alert('✅ Déplacement enregistré avec succès !');
+    showNotification('✅ Déplacement enregistré !');
 });
+
+// ===== NOTIFICATION HELPER =====
+function showNotification(message, type = 'success') {
+    const msgDiv = document.createElement('div');
+    const bgColor = type === 'success' 
+        ? 'linear-gradient(135deg, #10b981, #059669)'
+        : 'linear-gradient(135deg, #f59e0b, #d97706)';
+    
+    msgDiv.style.cssText = `
+        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+        background: ${bgColor}; color: white;
+        padding: 16px 24px; border-radius: 12px; font-weight: 600;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 9999;
+        animation: slideDown 0.3s ease-out;
+    `;
+    msgDiv.innerHTML = message;
+    document.body.appendChild(msgDiv);
+    
+    setTimeout(() => {
+        msgDiv.style.animation = 'slideUp 0.3s ease-out';
+        setTimeout(() => msgDiv.remove(), 300);
+    }, 3000);
+}
 
 // ===== GÉOLOCALISATION - CALCUL DISTANCE =====
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -767,11 +1219,9 @@ function startGPSTrip() {
                 }
             );
             
-            // Feedback visuel (pas d'alert)
             console.log('✅ Trajet démarré ! GPS activé');
         },
         (error) => {
-            // Afficher erreur uniquement si vraiment nécessaire
             console.error('Erreur GPS:', error);
             if (error.code === error.PERMISSION_DENIED) {
                 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
@@ -815,7 +1265,7 @@ function updatePosition(position) {
 }
 
 // ===== ARRÊTER TRAJET GPS =====
-function stopGPSTrip() {
+async function stopGPSTrip() {
     if (!tripData.active) return;
     
     tripData.endTime = new Date();
@@ -862,11 +1312,12 @@ function stopGPSTrip() {
             annualKm: userSettings.annualKm
         },
         notes: `Trajet GPS - ${tripData.distance.toFixed(2)} km réels - ${tripData.positions.length} points enregistrés`,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        synced: false
     };
     
-    deliveries.unshift(delivery);
-    LocalStorage.saveDeliveries(currentUser.username, deliveries);
+    await HybridStorage.saveDelivery(currentUser.username, delivery);
+    deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
     
     resetTrip();
     updateUI();
@@ -874,22 +1325,7 @@ function stopGPSTrip() {
     document.getElementById('deliveryFormContainer').classList.add('hidden');
     document.getElementById('fabBtn').classList.remove('hidden');
     
-    // Notification discrète de succès
-    const successMsg = document.createElement('div');
-    successMsg.style.cssText = `
-        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-        background: linear-gradient(135deg, #10b981, #059669); color: white;
-        padding: 16px 24px; border-radius: 12px; font-weight: 600;
-        box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4); z-index: 9999;
-        animation: slideDown 0.3s ease-out;
-    `;
-    successMsg.innerHTML = `✅ Trajet GPS enregistré !<br><small>${tripData.distance.toFixed(2)} km • ${payment.toFixed(2)} €</small>`;
-    document.body.appendChild(successMsg);
-    
-    setTimeout(() => {
-        successMsg.style.animation = 'slideUp 0.3s ease-out';
-        setTimeout(() => successMsg.remove(), 300);
-    }, 3000);
+    showNotification(`✅ Trajet GPS enregistré !<br><small>${tripData.distance.toFixed(2)} km • ${payment.toFixed(2)} €</small>`);
 }
 
 // ===== RESET TRAJET =====
@@ -945,7 +1381,6 @@ document.getElementById('btnStartTrip').addEventListener('click', startGPSTrip);
 document.getElementById('btnStopTrip').addEventListener('click', stopGPSTrip);
 
 // ===== PARAMÈTRES VÉHICULE - AUTO-SAUVEGARDE =====
-// Type de véhicule
 document.querySelectorAll('input[name="vehicleType"]').forEach(input => {
     input.addEventListener('change', function() {
         userSettings.vehicleType = this.value;
@@ -956,7 +1391,6 @@ document.querySelectorAll('input[name="vehicleType"]').forEach(input => {
     });
 });
 
-// Motorisation
 document.querySelectorAll('input[name="motorisation"]').forEach(input => {
     input.addEventListener('change', function() {
         userSettings.motorisation = this.value;
@@ -965,7 +1399,6 @@ document.querySelectorAll('input[name="motorisation"]').forEach(input => {
     });
 });
 
-// Chevaux fiscaux
 const fiscalPowerSelect = document.getElementById('fiscalPower');
 if (fiscalPowerSelect) {
     fiscalPowerSelect.addEventListener('change', function() {
@@ -975,7 +1408,6 @@ if (fiscalPowerSelect) {
     });
 }
 
-// Kilométrage annuel
 const annualKmSelect = document.getElementById('annualKm');
 if (annualKmSelect) {
     annualKmSelect.addEventListener('change', function() {
@@ -985,7 +1417,6 @@ if (annualKmSelect) {
     });
 }
 
-// Mettre à jour les options de kilométrage selon le type de véhicule
 function updateKmRanges() {
     const annualKmSelect = document.getElementById('annualKm');
     if (!annualKmSelect) return;
@@ -1000,11 +1431,9 @@ function updateKmRanges() {
            <option value="tranche2">Entre 3 001 et 6 000 km/an (~16 km/jour)</option>
            <option value="tranche3">Plus de 6 000 km/an (~16+ km/jour)</option>`;
     
-    // Sélectionner la tranche sauvegardée
     annualKmSelect.value = userSettings.annualKm;
 }
 
-// Mettre à jour les options de puissance fiscale selon le type de véhicule
 function updateFiscalPowerOptions() {
     const fiscalPowerSelect = document.getElementById('fiscalPower');
     if (!fiscalPowerSelect) return;
@@ -1024,7 +1453,6 @@ function updateFiscalPowerOptions() {
             <option value="cv5plus">Plus de 5 CV</option>
         `;
     } else {
-        // Cyclo n'a pas de choix de CV
         fiscalPowerSelect.innerHTML = `<option value="unique">Cyclomoteur (pas de CV)</option>`;
         fiscalPowerSelect.disabled = true;
         userSettings.fiscalPower = 'unique';
@@ -1059,11 +1487,9 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         return;
     }
 
-    // 1. PRÉPARATION DES DONNÉES
     const totalKm = deliveries.reduce((sum, d) => sum + (d.distance || 0), 0);
     const baseTrajets = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
     
-    // (Assure-toi que la fonction getPartieFixeAnnuelle existe, sinon ça renverra 0 pour l'instant)
     const partieFixe = typeof getPartieFixeAnnuelle === 'function' ? getPartieFixeAnnuelle(
         userSettings.vehicleType,
         userSettings.motorisation,
@@ -1073,7 +1499,6 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     
     const totalAvecPartieFixe = baseTrajets + partieFixe;
 
-    // 2. CONSTRUCTION DU TABLEAU
     const data = [
         ['ROUTE NOTE - ' + currentUser.username.toUpperCase()],
         ['Généré le : ' + new Date().toLocaleString('fr-FR')],
@@ -1095,22 +1520,16 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
         ]);
     });
 
-    // Ligne TOTAUX
     data.push(['']);
     data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), baseTrajets.toFixed(2), '']);
     
     data.push(['']);
-    
-    // --- SECTION : DÉTAIL DU CALCUL FINANCIER ---
-    // Le texte va en colonne 0 (A), la valeur en colonne 4 (E). On fusionnera tout ça après.
     data.push(['DÉTAIL DU CALCUL FINANCIER', '', '', '', '']); 
     data.push(['Base trajets cumulée (km × tarif)', '', '', '', baseTrajets.toFixed(2) + ' €']);
     data.push(['Forfait annuel (selon barème)', '', '', '', partieFixe.toFixed(2) + ' €']);
     data.push(['TOTAL GLOBAL', '', '', '', totalAvecPartieFixe.toFixed(2) + ' €']);
     
     data.push(['']);
-    
-    // --- SECTION : STATISTIQUES D'ACTIVITÉ ---
     data.push(['STATISTIQUES D\'ACTIVITÉ', '', '', '', '']);
     data.push(['Nombre total de déplacements', '', '', '', deliveries.length]);
     data.push(['Distance totale parcourue', '', '', '', totalKm.toFixed(0) + ' km']);
@@ -1118,162 +1537,23 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
 
     const ws = XLSX.utils.aoa_to_sheet(data);
 
-    // Largeur des colonnes
     ws['!cols'] = [
-        { wch: 15 }, // A
-        { wch: 25 }, // B
-        { wch: 10 }, // C
-        { wch: 10 }, // D
-        { wch: 12 }, // E
-        { wch: 12 }, // F
-        { wch: 14 }, // G
-        { wch: 14 }, // H
-        { wch: 35 }  // I
+        { wch: 15 }, { wch: 25 }, { wch: 10 }, { wch: 10 },
+        { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 35 }
     ];
 
-    // 3. STYLES AVANCÉS (Nécessite xlsx-js-style dans le HTML)
-    const styles = {
-        title: { font: { bold: true, size: 16, color: { rgb: "2563EB" } }, alignment: { horizontal: "center" } },
-        subtitle: { font: { italic: true, size: 10, color: { rgb: "6B7280" } }, alignment: { horizontal: "center" } },
-        header: { 
-            font: { bold: true, color: { rgb: "FFFFFF" }, size: 12 }, 
-            fill: { fgColor: { rgb: "2563EB" } }, 
-            alignment: { horizontal: "center", vertical: "center" },
-            border: { top: {style:"thin"}, bottom: {style:"thin"}, left: {style:"thin"}, right: {style:"thin"} }
-        },
-        dataEven: { alignment: { horizontal: "center", vertical: "center" }, fill: { fgColor: { rgb: "F9FAFB" } }, border: { top: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}}, left: {style:"thin", color:{rgb:"E5E7EB"}}, right: {style:"thin", color:{rgb:"E5E7EB"}} } },
-        dataOdd: { alignment: { horizontal: "center", vertical: "center" }, border: { top: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}}, left: {style:"thin", color:{rgb:"E5E7EB"}}, right: {style:"thin", color:{rgb:"E5E7EB"}} } },
-        totalRow: { font: { bold: true, size: 12 }, fill: { fgColor: { rgb: "DBEAFE" } }, alignment: { horizontal: "center", vertical: "center" }, border: { top: {style:"medium", color:{rgb:"2563EB"}}, bottom: {style:"medium", color:{rgb:"2563EB"}} } },
-        
-        // Styles pour les résumés en bas (Centrés et larges)
-        sectionTitle: { font: { bold: true, size: 12, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "4B5563" } }, alignment: { horizontal: "center", vertical: "center" } },
-        summaryLabel: { font: { bold: true, size: 11 }, alignment: { horizontal: "left", vertical: "center" }, border: { left: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}} } },
-        summaryValue: { font: { size: 11 }, alignment: { horizontal: "center", vertical: "center" }, border: { right: {style:"thin", color:{rgb:"E5E7EB"}}, bottom: {style:"thin", color:{rgb:"E5E7EB"}} } },
-        grandTotalLabel: { font: { bold: true, size: 13, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "10B981" } }, alignment: { horizontal: "left", vertical: "center" }, border: { left: {style:"thin", color:{rgb:"059669"}}, bottom: {style:"thin", color:{rgb:"059669"}} } },
-        grandTotalValue: { font: { bold: true, size: 13, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "10B981" } }, alignment: { horizontal: "center", vertical: "center" }, border: { right: {style:"thin", color:{rgb:"059669"}}, bottom: {style:"thin", color:{rgb:"059669"}} } }
-    };
-
-    // 4. APPLICATION DES STYLES ET FUSIONS
-    const merges = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }, // Titre principal
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 8 } }  // Sous-titre
-    ];
-
-    if(ws['A1']) ws['A1'].s = styles.title;
-    if(ws['A2']) ws['A2'].s = styles.subtitle;
-
-    // Headers
-    for (let c = 0; c < 9; c++) {
-        const cell = XLSX.utils.encode_cell({r: 3, c: c});
-        if (ws[cell]) ws[cell].s = styles.header;
-    }
-
-    // Lignes de données
-    let rowIdx = 4;
-    for (let i = 0; i < deliveries.length; i++) {
-        for (let c = 0; c < 9; c++) {
-            const cell = XLSX.utils.encode_cell({r: rowIdx, c: c});
-            if (ws[cell]) ws[cell].s = (rowIdx % 2 === 0) ? styles.dataEven : styles.dataOdd;
-        }
-        rowIdx++;
-    }
-
-    rowIdx++; // Ligne vide
-
-    // Ligne TOTAUX du grand tableau
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 5 } }); // fusion de A à F
-    for (let c = 0; c < 9; c++) {
-        const cell = XLSX.utils.encode_cell({r: rowIdx, c: c});
-        if (!ws[cell]) ws[cell] = { t: 's', v: '' };
-        ws[cell].s = styles.totalRow;
-    }
-    
-    rowIdx += 2; // Saut jusqu'au tableau DÉTAIL
-
-    // --- Rendu Section DÉTAIL ---
-    // Titre
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 8 } }); // Fusionne sur toute la largeur
-    if (!ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})] = {t:'s', v:''};
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.sectionTitle;
-    rowIdx++;
-    
-    // 3 lignes de détails
-    for(let i=0; i<3; i++) {
-        // Fusion A à D pour le label (très large)
-        merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 3 } });
-        // Fusion E à I pour la valeur (très large et centrée)
-        merges.push({ s: { r: rowIdx, c: 4 }, e: { r: rowIdx, c: 8 } });
-        
-        let isGrandTotal = (i === 2);
-        let lblStyle = isGrandTotal ? styles.grandTotalLabel : styles.summaryLabel;
-        let valStyle = isGrandTotal ? styles.grandTotalValue : styles.summaryValue;
-
-        if(!ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]={t:'s',v:''};
-        ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = lblStyle;
-        
-        if(!ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})]={t:'s',v:''};
-        ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})].s = valStyle;
-        
-        rowIdx++;
-    }
-
-    rowIdx++; // Ligne vide
-
-    // --- Rendu Section STATS ---
-    // Titre
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 8 } });
-    if (!ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})] = {t:'s', v:''};
-    ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.sectionTitle;
-    rowIdx++;
-    
-    // 3 lignes de stats
-    for(let i=0; i<3; i++) {
-        merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 3 } });
-        merges.push({ s: { r: rowIdx, c: 4 }, e: { r: rowIdx, c: 8 } });
-        
-        if(!ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})]={t:'s',v:''};
-        ws[XLSX.utils.encode_cell({r: rowIdx, c: 0})].s = styles.summaryLabel;
-        
-        if(!ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})]) ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})]={t:'s',v:''};
-        ws[XLSX.utils.encode_cell({r: rowIdx, c: 4})].s = styles.summaryValue;
-        
-        rowIdx++;
-    }
-
-    ws['!merges'] = merges;
-
-    // 5. GÉNÉRATION
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
 
-	const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
-    // Fonction pour afficher notre notification stylée
-    const notifyUser = (message) => {
-        const msgDiv = document.createElement('div');
-        msgDiv.style.cssText = `
-            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-            background: linear-gradient(135deg, #10b981, #059669); color: white;
-            padding: 16px 24px; border-radius: 12px; font-weight: 600;
-            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4); z-index: 9999;
-            text-align: center; width: 80%; max-width: 350px;
-        `;
-        msgDiv.innerHTML = message;
-        document.body.appendChild(msgDiv);
-        setTimeout(() => msgDiv.remove(), 4500);
-    };
-
-    // Détection : Est-ce un appareil mobile (téléphone/tablette) ?
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-    // Préparation du fichier pour le partage mobile
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const file = new File([blob], filename, { type: blob.type });
 
-    // LOGIQUE DE TÉLÉCHARGEMENT
     if (isMobile && navigator.canShare && navigator.canShare({ files: [file] })) {
-        // --- COMPORTEMENT MOBILE ---
         const userChoice = confirm("Comment voulez-vous enregistrer le fichier ?\n\n[OK] = Choisir mon dossier (Partager)\n[Annuler] = Téléchargement rapide");
 
         if (userChoice) {
@@ -1281,19 +1561,34 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
                 files: [file],
                 title: 'Export Route Note'
             })
-            .then(() => notifyUser('✅ Export réussi !'))
+            .then(() => showNotification('✅ Export réussi !'))
             .catch((error) => console.log('Partage annulé', error));
         } else {
             XLSX.writeFile(wb, filename);
-            notifyUser('✅ Fichier téléchargé !<br><small>Vérifiez votre dossier "Téléchargements".</small>');
+            showNotification('✅ Fichier téléchargé !<br><small>Vérifiez votre dossier "Téléchargements".</small>');
         }
     } else {
-        // --- COMPORTEMENT PC / MAC ---
-        // Sur ordinateur, on lance directement le téléchargement classique
         XLSX.writeFile(wb, filename);
-        notifyUser('✅ Fichier téléchargé !<br><small>Regardez dans votre dossier Téléchargements.</small>');
+        showNotification('✅ Fichier téléchargé !<br><small>Regardez dans votre dossier Téléchargements.</small>');
     }
 });
+
+// ===== BOUTON SYNC MANUEL =====
+// Ajouter dans les settings pour forcer une sync
+async function forceSync() {
+    if (!currentUser) return;
+    
+    showNotification('🔄 Synchronisation en cours...', 'info');
+    
+    try {
+        await HybridStorage.syncDeliveriesToCloud(currentUser.username);
+        deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
+        updateUI();
+        showNotification('✅ Synchronisation terminée !');
+    } catch (error) {
+        showNotification('❌ Erreur de synchronisation', 'error');
+    }
+}
 
 // ===== NAVIGATION =====
 document.querySelectorAll('.nav-item').forEach(item => {
@@ -1314,4 +1609,4 @@ document.querySelectorAll('.nav-item').forEach(item => {
     });
 });
 
-console.log('✅ Route Note PWA chargé avec succès !');
+console.log('✅ Route Note PWA avec Supabase chargé !');
