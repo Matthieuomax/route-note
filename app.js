@@ -1,19 +1,19 @@
 // ================================
 // ROUTE NOTE - PWA JavaScript
-// Version avec Supabase + LocalStorage hybride
+// Version 2 : Connexion simple par prénom + Sync Supabase
 // ================================
 
 // ===== CONFIGURATION SUPABASE =====
 const SUPABASE_URL = 'https://picyuqnjhjmmomxxcgrg.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpY3l1cW5qaGptbW9teHhjZ3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1NTcxNDEsImV4cCI6MjA5MDEzMzE0MX0.9IypoAHc5Z1z2j3BIT6FQQOZtoak-KJ7beoPgjtji20';
 
-// Client Supabase (sera initialisé après chargement du SDK)
-let supabase = null;
+// Client Supabase (renommé pour éviter conflit)
+let supabaseClient = null;
 
 // ===== ENREGISTREMENT SERVICE WORKER =====
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js')
+        navigator.serviceWorker.register('./sw.js')
             .then(reg => console.log('✅ Service Worker enregistré'))
             .catch(err => console.log('❌ Erreur SW:', err));
     });
@@ -21,46 +21,69 @@ if ('serviceWorker' in navigator) {
 
 // ===== INITIALISATION SUPABASE =====
 function initSupabase() {
-    console.log('🔄 Tentative d\'initialisation Supabase...');
-    console.log('window.supabase existe ?', !!window.supabase);
+    console.log('🔄 Initialisation Supabase...');
     
-    if (window.supabase && window.supabase.createClient) {
+    // Le SDK expose window.supabase.createClient
+    if (typeof window !== 'undefined' && window.supabase && window.supabase.createClient) {
         try {
-            supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            console.log('✅ Supabase initialisé avec succès');
-            console.log('URL:', SUPABASE_URL);
+            supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            console.log('✅ Supabase connecté !');
             return true;
         } catch (error) {
-            console.error('❌ Erreur création client Supabase:', error);
+            console.error('❌ Erreur Supabase:', error);
             return false;
         }
     }
-    console.warn('⚠️ SDK Supabase non chargé, mode hors ligne activé');
+    
+    console.warn('⚠️ Supabase non disponible - Mode hors ligne');
     return false;
 }
 
-// ===== SYSTÈME DE STOCKAGE HYBRIDE =====
-class HybridStorage {
-    // ===== LOCAL STORAGE (Cache/Offline) =====
-    static getLocalUsers() {
+// ===== SYSTÈME DE STOCKAGE LOCAL =====
+class LocalStorage {
+    static getUsers() {
         return JSON.parse(localStorage.getItem('users') || '{}');
     }
 
-    static saveLocalUsers(users) {
+    static saveUsers(users) {
         localStorage.setItem('users', JSON.stringify(users));
     }
 
-    static getLocalDeliveries(username) {
+    static createUser(username, password) {
+        const users = this.getUsers();
+        if (users[username]) {
+            throw new Error('Ce prénom est déjà utilisé');
+        }
+        users[username] = {
+            password: btoa(password),
+            createdAt: new Date().toISOString()
+        };
+        this.saveUsers(users);
+        
+        // Sync vers Supabase en arrière-plan
+        this.syncUserToCloud(username, password);
+    }
+
+    static verifyUser(username, password) {
+        const users = this.getUsers();
+        const user = users[username];
+        if (!user || user.password !== btoa(password)) {
+            throw new Error('Prénom ou mot de passe incorrect');
+        }
+        return { username };
+    }
+
+    static getDeliveries(username) {
         const key = `deliveries_${username}`;
         return JSON.parse(localStorage.getItem(key) || '[]');
     }
 
-    static saveLocalDeliveries(username, deliveries) {
+    static saveDeliveries(username, deliveries) {
         const key = `deliveries_${username}`;
         localStorage.setItem(key, JSON.stringify(deliveries));
     }
 
-    static getLocalSettings(username) {
+    static getSettings(username) {
         const key = `settings_${username}`;
         const defaults = { 
             vehicleType: 'auto',
@@ -72,22 +95,23 @@ class HybridStorage {
         return JSON.parse(localStorage.getItem(key) || JSON.stringify(defaults));
     }
 
-    static saveLocalSettings(username, settings) {
+    static saveSettings(username, settings) {
         const key = `settings_${username}`;
         localStorage.setItem(key, JSON.stringify(settings));
+        
+        // Sync vers Supabase en arrière-plan
+        CloudSync.syncSettings(username, settings);
     }
 
-    // ===== SUPABASE AUTH =====
-    static async signUp(email, password, username) {
-        console.log('📝 Tentative inscription...', { email, username });
-        
-        if (!supabase) {
-            console.error('❌ Supabase non initialisé');
-            throw new Error('Mode hors ligne - inscription impossible. Vérifiez votre connexion internet.');
-        }
+    // Sync user vers Supabase
+    static async syncUserToCloud(username, password) {
+        if (!supabaseClient) return;
         
         try {
-            const { data, error } = await supabase.auth.signUp({
+            // Créer un email fictif basé sur le username
+            const email = `${username.toLowerCase().replace(/\s+/g, '_')}@routenote.local`;
+            
+            const { data, error } = await supabaseClient.auth.signUp({
                 email: email,
                 password: password,
                 options: {
@@ -95,158 +119,122 @@ class HybridStorage {
                 }
             });
             
-            console.log('Réponse signUp:', { data, error });
-            
             if (error) {
-                console.error('❌ Erreur Supabase signUp:', error);
-                throw error;
+                console.log('⚠️ Sync user cloud:', error.message);
+            } else {
+                console.log('✅ User synchronisé vers le cloud');
+                
+                // Sauvegarder l'ID Supabase localement
+                const users = this.getUsers();
+                if (users[username]) {
+                    users[username].supabaseId = data.user?.id;
+                    users[username].email = email;
+                    this.saveUsers(users);
+                }
             }
-            
-            // Sauvegarder aussi en local pour le mode offline
-            const users = this.getLocalUsers();
-            users[username] = {
-                email: email,
-                password: btoa(password),
-                supabaseId: data.user?.id,
-                createdAt: new Date().toISOString()
-            };
-            this.saveLocalUsers(users);
-            
-            console.log('✅ Inscription réussie');
-            return data;
-            
         } catch (err) {
-            console.error('❌ Exception signUp:', err);
-            throw err;
+            console.log('⚠️ Erreur sync user:', err.message);
         }
     }
+}
 
-    static async signIn(emailOrUsername, password) {
-        console.log('🔐 Tentative connexion...', { emailOrUsername });
+// ===== SYNCHRONISATION CLOUD =====
+class CloudSync {
+    static isOnline() {
+        return navigator.onLine && supabaseClient !== null;
+    }
+
+    // Sync les trajets vers Supabase
+    static async syncDeliveries(username) {
+        if (!this.isOnline()) return;
         
-        // Essayer d'abord Supabase
-        if (supabase) {
+        const users = LocalStorage.getUsers();
+        const userId = users[username]?.supabaseId;
+        if (!userId) return;
+        
+        const deliveries = LocalStorage.getDeliveries(username);
+        const unsynced = deliveries.filter(d => !d.synced);
+        
+        if (unsynced.length === 0) return;
+        
+        console.log(`📤 Sync ${unsynced.length} trajets...`);
+        
+        for (const delivery of unsynced) {
             try {
-                // Déterminer si c'est un email ou username
-                let email = emailOrUsername;
-                if (!emailOrUsername.includes('@')) {
-                    // C'est un username, chercher l'email en local
-                    const users = this.getLocalUsers();
-                    console.log('Users locaux:', Object.keys(users));
-                    if (users[emailOrUsername]?.email) {
-                        email = users[emailOrUsername].email;
-                        console.log('Email trouvé pour username:', email);
-                    } else {
-                        console.log('Pas d\'email trouvé, essai mode local');
-                        throw new Error('Username sans email associé');
-                    }
+                const { error } = await supabaseClient
+                    .from('deliveries')
+                    .upsert({
+                        user_id: userId,
+                        local_id: delivery.id,
+                        date: delivery.date,
+                        client_name: delivery.clientName,
+                        start_time: delivery.startTime || null,
+                        end_time: delivery.endTime || null,
+                        start_km: delivery.startKm || 0,
+                        end_km: delivery.endKm || 0,
+                        distance: delivery.distance || 0,
+                        payment: delivery.payment || 0,
+                        vehicle_config: delivery.vehicleConfig || {},
+                        notes: delivery.notes || null
+                    }, {
+                        onConflict: 'user_id,local_id'
+                    });
+                
+                if (!error) {
+                    delivery.synced = true;
                 }
-
-                console.log('Connexion Supabase avec email:', email);
-                const { data, error } = await supabase.auth.signInWithPassword({
-                    email: email,
-                    password: password
-                });
-                
-                console.log('Réponse signIn:', { data, error });
-                
-                if (error) {
-                    console.error('❌ Erreur Supabase signIn:', error);
-                    throw error;
-                }
-                
-                // Récupérer le profil depuis Supabase
-                const { data: profile, error: profileError } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', data.user.id)
-                    .single();
-                
-                console.log('Profil récupéré:', { profile, profileError });
-                
-                const username = profile?.username || emailOrUsername.split('@')[0];
-                
-                // Mettre à jour le cache local
-                const users = this.getLocalUsers();
-                users[username] = {
-                    email: email,
-                    password: btoa(password),
-                    supabaseId: data.user.id,
-                    createdAt: users[username]?.createdAt || new Date().toISOString()
-                };
-                this.saveLocalUsers(users);
-                
-                // Sync les settings depuis Supabase
-                if (profile) {
-                    const settings = {
-                        vehicleType: profile.vehicle_type || 'auto',
-                        motorisation: profile.motorisation || 'thermique',
-                        fiscalPower: profile.fiscal_power || 'cv4',
-                        annualKm: profile.annual_km || 'tranche2',
-                        theme: profile.theme || 'blue'
-                    };
-                    this.saveLocalSettings(username, settings);
-                }
-                
-                // Sync les livraisons depuis Supabase
-                await this.syncDeliveriesFromCloud(username, data.user.id);
-                
-                console.log('✅ Connexion Supabase réussie');
-                return { 
-                    user: data.user, 
-                    username: username,
-                    isOnline: true 
-                };
-                
-            } catch (error) {
-                console.warn('⚠️ Connexion Supabase échouée:', error.message);
-                console.log('Tentative connexion locale...');
+            } catch (err) {
+                console.log('⚠️ Erreur sync trajet:', err.message);
             }
-        } else {
-            console.log('Supabase non disponible, mode local');
         }
         
-        // Fallback : connexion locale
-        return this.signInLocal(emailOrUsername, password);
+        LocalStorage.saveDeliveries(username, deliveries);
+        console.log('✅ Sync terminée');
     }
 
-    static signInLocal(username, password) {
-        const users = this.getLocalUsers();
-        const user = users[username];
+    // Sync les paramètres vers Supabase
+    static async syncSettings(username, settings) {
+        if (!this.isOnline()) return;
         
-        if (!user || user.password !== btoa(password)) {
-            throw new Error('Identifiant ou mot de passe incorrect');
-        }
-        
-        return { 
-            user: { id: user.supabaseId || username },
-            username: username,
-            isOnline: false 
-        };
-    }
-
-    static async signOut() {
-        if (supabase) {
-            await supabase.auth.signOut();
-        }
-        localStorage.removeItem('currentUser');
-    }
-
-    // ===== SYNC DELIVERIES =====
-    static async syncDeliveriesFromCloud(username, userId) {
-        if (!supabase || !userId) return;
+        const users = LocalStorage.getUsers();
+        const userId = users[username]?.supabaseId;
+        if (!userId) return;
         
         try {
-            const { data: cloudDeliveries, error } = await supabase
+            await supabaseClient
+                .from('profiles')
+                .update({
+                    vehicle_type: settings.vehicleType,
+                    motorisation: settings.motorisation,
+                    fiscal_power: settings.fiscalPower,
+                    annual_km: settings.annualKm,
+                    theme: settings.theme
+                })
+                .eq('id', userId);
+        } catch (err) {
+            console.log('⚠️ Erreur sync settings:', err.message);
+        }
+    }
+
+    // Récupérer les trajets depuis le cloud
+    static async fetchFromCloud(username) {
+        if (!this.isOnline()) return;
+        
+        const users = LocalStorage.getUsers();
+        const userId = users[username]?.supabaseId;
+        if (!userId) return;
+        
+        try {
+            const { data, error } = await supabaseClient
                 .from('deliveries')
                 .select('*')
                 .eq('user_id', userId)
                 .order('created_at', { ascending: false });
             
-            if (error) throw error;
+            if (error || !data) return;
             
-            // Convertir format Supabase vers format local
-            const localFormat = cloudDeliveries.map(d => ({
+            // Convertir et fusionner
+            const cloudDeliveries = data.map(d => ({
                 id: d.local_id || d.id,
                 date: d.date,
                 clientName: d.client_name,
@@ -259,239 +247,33 @@ class HybridStorage {
                 vehicleConfig: d.vehicle_config,
                 notes: d.notes,
                 createdAt: d.created_at,
-                supabaseId: d.id,
                 synced: true
             }));
             
-            // Fusionner avec les données locales non synchronisées
-            const localDeliveries = this.getLocalDeliveries(username);
-            const unsyncedLocal = localDeliveries.filter(d => !d.synced);
+            // Fusionner avec local
+            const localDeliveries = LocalStorage.getDeliveries(username);
+            const localUnsynced = localDeliveries.filter(d => !d.synced);
             
-            // Combiner : cloud + local non synchronisé
-            const merged = [...localFormat];
-            for (const local of unsyncedLocal) {
-                if (!merged.find(d => d.id === local.id)) {
+            // Créer un set des IDs cloud
+            const cloudIds = new Set(cloudDeliveries.map(d => d.id));
+            
+            // Ajouter les locaux non synchronisés qui ne sont pas dans le cloud
+            const merged = [...cloudDeliveries];
+            for (const local of localUnsynced) {
+                if (!cloudIds.has(local.id)) {
                     merged.push(local);
                 }
             }
             
-            // Trier par date décroissante
+            // Trier par date
             merged.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             
-            this.saveLocalDeliveries(username, merged);
-            console.log(`✅ Sync: ${cloudDeliveries.length} trajets récupérés du cloud`);
+            LocalStorage.saveDeliveries(username, merged);
+            console.log(`✅ ${cloudDeliveries.length} trajets récupérés du cloud`);
             
-        } catch (error) {
-            console.error('❌ Erreur sync cloud:', error);
+        } catch (err) {
+            console.log('⚠️ Erreur fetch cloud:', err.message);
         }
-    }
-
-    static async syncDeliveriesToCloud(username) {
-        if (!supabase) return;
-        
-        const session = await supabase.auth.getSession();
-        const userId = session?.data?.session?.user?.id;
-        
-        if (!userId) return;
-        
-        const localDeliveries = this.getLocalDeliveries(username);
-        const unsynced = localDeliveries.filter(d => !d.synced);
-        
-        if (unsynced.length === 0) return;
-        
-        console.log(`📤 Synchronisation de ${unsynced.length} trajets vers le cloud...`);
-        
-        for (const delivery of unsynced) {
-            try {
-                const cloudData = {
-                    user_id: userId,
-                    local_id: delivery.id,
-                    date: delivery.date,
-                    client_name: delivery.clientName,
-                    start_time: delivery.startTime || null,
-                    end_time: delivery.endTime || null,
-                    start_km: delivery.startKm || 0,
-                    end_km: delivery.endKm || 0,
-                    distance: delivery.distance || 0,
-                    payment: delivery.payment || 0,
-                    vehicle_config: delivery.vehicleConfig || {},
-                    notes: delivery.notes || null
-                };
-                
-                const { data, error } = await supabase
-                    .from('deliveries')
-                    .upsert(cloudData, { 
-                        onConflict: 'user_id,local_id',
-                        ignoreDuplicates: false 
-                    })
-                    .select()
-                    .single();
-                
-                if (error) throw error;
-                
-                // Marquer comme synchronisé
-                delivery.synced = true;
-                delivery.supabaseId = data.id;
-                
-            } catch (error) {
-                console.error('❌ Erreur sync trajet:', error);
-            }
-        }
-        
-        this.saveLocalDeliveries(username, localDeliveries);
-        console.log('✅ Synchronisation terminée');
-    }
-
-    static async saveDelivery(username, delivery) {
-        // Toujours sauvegarder en local d'abord
-        const deliveries = this.getLocalDeliveries(username);
-        
-        // Marquer comme non synchronisé
-        delivery.synced = false;
-        
-        // Ajouter ou mettre à jour
-        const existingIndex = deliveries.findIndex(d => d.id === delivery.id);
-        if (existingIndex >= 0) {
-            deliveries[existingIndex] = delivery;
-        } else {
-            deliveries.unshift(delivery);
-        }
-        
-        this.saveLocalDeliveries(username, deliveries);
-        
-        // Tenter de sync vers le cloud en arrière-plan
-        this.syncDeliveriesToCloud(username).catch(console.error);
-        
-        return delivery;
-    }
-
-    static async deleteDelivery(username, deliveryId) {
-        // Supprimer en local
-        let deliveries = this.getLocalDeliveries(username);
-        const toDelete = deliveries.find(d => d.id === deliveryId);
-        deliveries = deliveries.filter(d => d.id !== deliveryId);
-        this.saveLocalDeliveries(username, deliveries);
-        
-        // Supprimer du cloud si synchronisé
-        if (supabase && toDelete?.supabaseId) {
-            try {
-                await supabase
-                    .from('deliveries')
-                    .delete()
-                    .eq('id', toDelete.supabaseId);
-            } catch (error) {
-                console.error('❌ Erreur suppression cloud:', error);
-            }
-        }
-    }
-
-    // ===== SYNC SETTINGS =====
-    static async saveSettings(username, settings) {
-        // Toujours sauvegarder en local
-        this.saveLocalSettings(username, settings);
-        
-        // Sync vers Supabase si connecté
-        if (supabase) {
-            try {
-                const session = await supabase.auth.getSession();
-                const userId = session?.data?.session?.user?.id;
-                
-                if (userId) {
-                    await supabase
-                        .from('profiles')
-                        .update({
-                            vehicle_type: settings.vehicleType,
-                            motorisation: settings.motorisation,
-                            fiscal_power: settings.fiscalPower,
-                            annual_km: settings.annualKm,
-                            theme: settings.theme
-                        })
-                        .eq('id', userId);
-                }
-            } catch (error) {
-                console.error('❌ Erreur sync settings:', error);
-            }
-        }
-    }
-
-    // ===== MIGRATION DES DONNÉES EXISTANTES =====
-    static async migrateExistingData(username) {
-        if (!supabase) return;
-        
-        const session = await supabase.auth.getSession();
-        const userId = session?.data?.session?.user?.id;
-        
-        if (!userId) return;
-        
-        const localDeliveries = this.getLocalDeliveries(username);
-        const unsynced = localDeliveries.filter(d => !d.synced && !d.supabaseId);
-        
-        if (unsynced.length > 0) {
-            console.log(`🔄 Migration de ${unsynced.length} trajets existants...`);
-            await this.syncDeliveriesToCloud(username);
-        }
-    }
-}
-
-// ===== ÉTAT DE CONNEXION =====
-class ConnectionStatus {
-    static isOnline() {
-        return navigator.onLine;
-    }
-
-    static init() {
-        window.addEventListener('online', () => {
-            console.log('📶 Connexion rétablie');
-            this.showStatus('online');
-            // Synchroniser les données en attente
-            if (currentUser) {
-                HybridStorage.syncDeliveriesToCloud(currentUser.username);
-            }
-        });
-
-        window.addEventListener('offline', () => {
-            console.log('📴 Mode hors ligne');
-            this.showStatus('offline');
-        });
-    }
-
-    static showStatus(status) {
-        // Créer ou mettre à jour l'indicateur de statut
-        let indicator = document.getElementById('connectionStatus');
-        
-        if (!indicator) {
-            indicator = document.createElement('div');
-            indicator.id = 'connectionStatus';
-            indicator.style.cssText = `
-                position: fixed;
-                top: 10px;
-                right: 10px;
-                padding: 8px 16px;
-                border-radius: 20px;
-                font-size: 12px;
-                font-weight: 600;
-                z-index: 9999;
-                transition: all 0.3s ease;
-                opacity: 0;
-            `;
-            document.body.appendChild(indicator);
-        }
-
-        if (status === 'online') {
-            indicator.textContent = '📶 En ligne';
-            indicator.style.background = 'linear-gradient(135deg, #d1fae5, #10b981)';
-            indicator.style.color = '#065f46';
-        } else {
-            indicator.textContent = '📴 Hors ligne';
-            indicator.style.background = 'linear-gradient(135deg, #fee2e2, #ef4444)';
-            indicator.style.color = '#991b1b';
-        }
-
-        indicator.style.opacity = '1';
-        
-        setTimeout(() => {
-            indicator.style.opacity = '0';
-        }, 3000);
     }
 }
 
@@ -693,126 +475,95 @@ const loginForm = document.getElementById('loginForm');
 const authError = document.getElementById('authError');
 const authSuccess = document.getElementById('authSuccess');
 
-// ===== INITIALISATION =====
-document.addEventListener('DOMContentLoaded', async () => {
+// ===== INITIALISATION AU CHARGEMENT =====
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 Route Note démarrage...');
+    
     // Initialiser Supabase
     initSupabase();
-    
-    // Initialiser le monitoring de connexion
-    ConnectionStatus.init();
     
     // Vérifier si utilisateur déjà connecté
     const savedUser = localStorage.getItem('currentUser');
     if (savedUser) {
         currentUser = JSON.parse(savedUser);
-        await loadUserData();
+        loadUserData();
         showApp();
         setTimeout(() => updateUI(), 0);
         
-        // Tenter une sync en arrière-plan
-        if (supabase && ConnectionStatus.isOnline()) {
-            HybridStorage.syncDeliveriesToCloud(currentUser.username).catch(console.error);
-        }
+        // Sync en arrière-plan
+        CloudSync.syncDeliveries(currentUser.username);
     }
+    
+    // Écouter les changements de connexion
+    window.addEventListener('online', () => {
+        console.log('📶 Connexion rétablie');
+        showNotification('📶 Connexion rétablie', 'info');
+        if (currentUser) {
+            CloudSync.syncDeliveries(currentUser.username);
+        }
+    });
+    
+    window.addEventListener('offline', () => {
+        console.log('📴 Mode hors ligne');
+        showNotification('📴 Mode hors ligne', 'warning');
+    });
 });
 
 // ===== INSCRIPTION =====
-document.getElementById('switchToRegister').addEventListener('click', async () => {
-    // Afficher le formulaire d'inscription
-    const email = prompt('Entrez votre email :');
-    if (!email || !email.includes('@')) {
-        showError('Email invalide');
-        return;
-    }
+document.getElementById('switchToRegister').addEventListener('click', () => {
+    const username = prompt('Choisissez un prénom ou pseudo :');
+    if (!username || username.trim() === '') return;
 
-    const username = prompt('Choisissez un identifiant :');
-    if (!username || username.trim() === '') {
-        showError('Identifiant requis');
-        return;
-    }
-
-    const password = prompt('Choisissez un mot de passe (min 6 caractères) :');
-    if (!password || password.length < 6) {
-        showError('Le mot de passe doit contenir au moins 6 caractères');
+    const password = prompt('Choisissez un mot de passe (min 4 caractères) :');
+    if (!password || password.length < 4) {
+        showError('Le mot de passe doit contenir au moins 4 caractères');
         return;
     }
 
     try {
-        if (supabase && ConnectionStatus.isOnline()) {
-            await HybridStorage.signUp(email, password, username.trim());
-            showSuccess('Compte créé ! Vérifiez votre email pour confirmer, puis connectez-vous.');
-        } else {
-            // Mode hors ligne : création locale uniquement
-            const users = HybridStorage.getLocalUsers();
-            if (users[username.trim()]) {
-                throw new Error('Cet identifiant existe déjà');
-            }
-            users[username.trim()] = {
-                email: email,
-                password: btoa(password),
-                createdAt: new Date().toISOString(),
-                localOnly: true
-            };
-            HybridStorage.saveLocalUsers(users);
-            showSuccess('Compte créé en mode hors ligne. Reconnectez-vous quand vous aurez internet pour synchroniser.');
-        }
+        LocalStorage.createUser(username.trim(), password);
+        showSuccess('✅ Compte créé ! Connectez-vous maintenant.');
     } catch (error) {
         showError(error.message);
     }
 });
 
 // ===== CONNEXION =====
-loginForm.addEventListener('submit', async (e) => {
+loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
     hideMessages();
 
-    const emailOrUsername = document.getElementById('loginUsername').value.trim();
+    const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value;
 
-    // Afficher un indicateur de chargement
-    const submitBtn = loginForm.querySelector('button[type="submit"]');
-    const originalText = submitBtn.textContent;
-    submitBtn.textContent = 'Connexion...';
-    submitBtn.disabled = true;
-
     try {
-        const result = await HybridStorage.signIn(emailOrUsername, password);
-        
-        currentUser = {
-            username: result.username,
-            id: result.user.id,
-            isOnline: result.isOnline
-        };
-        
-        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-        await loadUserData();
+        const user = LocalStorage.verifyUser(username, password);
+        currentUser = user;
+        localStorage.setItem('currentUser', JSON.stringify(user));
+        loadUserData();
         showApp();
         
-        // Afficher un message selon le mode
-        if (result.isOnline) {
-            ConnectionStatus.showStatus('online');
-        } else {
-            ConnectionStatus.showStatus('offline');
-        }
+        // Sync depuis le cloud en arrière-plan
+        CloudSync.fetchFromCloud(username).then(() => {
+            deliveries = LocalStorage.getDeliveries(username);
+            updateUI();
+        });
         
     } catch (error) {
         showError(error.message);
-    } finally {
-        submitBtn.textContent = originalText;
-        submitBtn.disabled = false;
     }
 });
 
 // ===== DÉCONNEXION =====
-document.getElementById('logoutBtn').addEventListener('click', async () => {
+document.getElementById('logoutBtn').addEventListener('click', () => {
     if (confirm('Voulez-vous vraiment vous déconnecter ?')) {
-        // Synchroniser avant déconnexion si possible
-        if (currentUser && supabase && ConnectionStatus.isOnline()) {
-            await HybridStorage.syncDeliveriesToCloud(currentUser.username);
+        // Sync avant déconnexion
+        if (currentUser) {
+            CloudSync.syncDeliveries(currentUser.username);
         }
         
-        await HybridStorage.signOut();
         currentUser = null;
+        localStorage.removeItem('currentUser');
         showAuth();
     }
 });
@@ -839,7 +590,7 @@ function showError(message) {
 function showSuccess(message) {
     authSuccess.textContent = message;
     authSuccess.classList.remove('hidden');
-    setTimeout(() => authSuccess.classList.add('hidden'), 5000);
+    setTimeout(() => authSuccess.classList.add('hidden'), 3000);
 }
 
 function hideMessages() {
@@ -847,14 +598,42 @@ function hideMessages() {
     authSuccess.classList.add('hidden');
 }
 
-// ===== CHARGEMENT DONNÉES UTILISATEUR =====
-async function loadUserData() {
-    userSettings = HybridStorage.getLocalSettings(currentUser.username);
-    deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
+// ===== NOTIFICATION HELPER =====
+function showNotification(message, type = 'success') {
+    const msgDiv = document.createElement('div');
+    let bgColor;
+    switch(type) {
+        case 'warning': bgColor = 'linear-gradient(135deg, #f59e0b, #d97706)'; break;
+        case 'info': bgColor = 'linear-gradient(135deg, #3b82f6, #2563eb)'; break;
+        case 'error': bgColor = 'linear-gradient(135deg, #ef4444, #dc2626)'; break;
+        default: bgColor = 'linear-gradient(135deg, #10b981, #059669)';
+    }
+    
+    msgDiv.style.cssText = `
+        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+        background: ${bgColor}; color: white;
+        padding: 16px 24px; border-radius: 12px; font-weight: 600;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 9999;
+        animation: slideDown 0.3s ease-out; text-align: center;
+    `;
+    msgDiv.innerHTML = message;
+    document.body.appendChild(msgDiv);
+    
+    setTimeout(() => {
+        msgDiv.style.opacity = '0';
+        msgDiv.style.transform = 'translateX(-50%) translateY(-20px)';
+        setTimeout(() => msgDiv.remove(), 300);
+    }, 3000);
 }
 
-async function saveSettings() {
-    await HybridStorage.saveSettings(currentUser.username, userSettings);
+// ===== CHARGEMENT DONNÉES UTILISATEUR =====
+function loadUserData() {
+    userSettings = LocalStorage.getSettings(currentUser.username);
+    deliveries = LocalStorage.getDeliveries(currentUser.username);
+}
+
+function saveSettings() {
+    LocalStorage.saveSettings(currentUser.username, userSettings);
 }
 
 // ===== MISE À JOUR UI =====
@@ -960,12 +739,12 @@ function renderDeliveries() {
     }
 
     container.innerHTML = deliveries.map(delivery => `
-        <div class="delivery-card ${delivery.synced ? '' : 'unsynced'}">
+        <div class="delivery-card ${delivery.synced === false ? 'unsynced' : ''}">
             <div class="delivery-header">
                 <div style="flex:1;">
                     <div class="delivery-client">
                         📦 ${delivery.clientName}
-                        ${!delivery.synced ? '<span class="sync-badge" title="Non synchronisé">⏳</span>' : ''}
+                        ${delivery.synced === false ? '<span class="sync-badge" title="Non synchronisé">⏳</span>' : ''}
                     </div>
                     <div class="delivery-date">${formatDate(delivery.date)}</div>
                 </div>
@@ -991,12 +770,13 @@ function formatDate(dateString) {
 }
 
 // ===== SUPPRESSION D'UN TRAJET =====
-async function deleteDelivery(id) {
+function deleteDelivery(id) {
     if (!confirm('Supprimer ce trajet ?')) return;
-    
-    await HybridStorage.deleteDelivery(currentUser.username, id);
-    deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
+    deliveries = deliveries.filter(d => d.id !== id);
+    LocalStorage.saveDeliveries(currentUser.username, deliveries);
     updateUI();
+    
+    // TODO: Supprimer aussi du cloud
 }
 
 // ===== FAB - BOUTON AJOUTER =====
@@ -1054,20 +834,14 @@ function requestGPSPermission() {
     }
     
     navigator.geolocation.getCurrentPosition(
-        () => {
-            console.log('✅ Permission GPS accordée');
-        },
+        () => console.log('✅ Permission GPS accordée'),
         (error) => {
             if (error.code === error.PERMISSION_DENIED) {
                 setTimeout(() => {
                     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
                     const message = isIOS 
-                        ? '📍 Géolocalisation nécessaire pour le mode automatique.\n\n' +
-                          'Activez-la dans :\n' +
-                          'Réglages > Confidentialité et sécurité > Service de localisation > Safari\n\n' +
-                          'Puis actualisez la page.'
-                        : '📍 Géolocalisation nécessaire pour le mode automatique.\n\n' +
-                          'Autorisez l\'accès dans les paramètres de votre navigateur.';
+                        ? '📍 Géolocalisation nécessaire.\n\nActivez-la dans :\nRéglages > Confidentialité > Service de localisation > Safari'
+                        : '📍 Géolocalisation nécessaire.\n\nAutorisez l\'accès dans les paramètres de votre navigateur.';
                     alert(message);
                 }, 500);
             }
@@ -1098,7 +872,7 @@ function calculateDelivery() {
 }
 
 // ===== SOUMISSION LIVRAISON MANUELLE =====
-document.getElementById('deliveryForm').addEventListener('submit', async (e) => {
+document.getElementById('deliveryForm').addEventListener('submit', (e) => {
     e.preventDefault();
 
     const clientName = document.getElementById('deliveryClient').value.trim();
@@ -1150,8 +924,11 @@ document.getElementById('deliveryForm').addEventListener('submit', async (e) => 
         synced: false
     };
 
-    await HybridStorage.saveDelivery(currentUser.username, delivery);
-    deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
+    deliveries.unshift(delivery);
+    LocalStorage.saveDeliveries(currentUser.username, deliveries);
+    
+    // Sync vers cloud en arrière-plan
+    CloudSync.syncDeliveries(currentUser.username);
     
     updateUI();
     document.getElementById('deliveryFormContainer').classList.add('hidden');
@@ -1161,29 +938,6 @@ document.getElementById('deliveryForm').addEventListener('submit', async (e) => 
     
     showNotification('✅ Déplacement enregistré !');
 });
-
-// ===== NOTIFICATION HELPER =====
-function showNotification(message, type = 'success') {
-    const msgDiv = document.createElement('div');
-    const bgColor = type === 'success' 
-        ? 'linear-gradient(135deg, #10b981, #059669)'
-        : 'linear-gradient(135deg, #f59e0b, #d97706)';
-    
-    msgDiv.style.cssText = `
-        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-        background: ${bgColor}; color: white;
-        padding: 16px 24px; border-radius: 12px; font-weight: 600;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 9999;
-        animation: slideDown 0.3s ease-out;
-    `;
-    msgDiv.innerHTML = message;
-    document.body.appendChild(msgDiv);
-    
-    setTimeout(() => {
-        msgDiv.style.animation = 'slideUp 0.3s ease-out';
-        setTimeout(() => msgDiv.remove(), 300);
-    }, 3000);
-}
 
 // ===== GÉOLOCALISATION - CALCUL DISTANCE =====
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -1261,20 +1015,12 @@ function startGPSTrip() {
                 }
             );
             
-            console.log('✅ Trajet démarré ! GPS activé');
+            console.log('✅ Trajet GPS démarré');
         },
         (error) => {
             console.error('Erreur GPS:', error);
             if (error.code === error.PERMISSION_DENIED) {
-                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-                const message = isIOS 
-                    ? '❌ Permission GPS refusée.\n\n' +
-                      'Activez-la dans :\n' +
-                      'Réglages > Confidentialité et sécurité > Service de localisation > Safari\n\n' +
-                      'Puis actualisez la page.'
-                    : '❌ Permission GPS refusée.\n\n' +
-                      'Activez la localisation dans les paramètres de votre appareil.';
-                alert(message);
+                alert('❌ Permission GPS refusée. Activez-la dans les paramètres.');
             }
         }
     );
@@ -1307,7 +1053,7 @@ function updatePosition(position) {
 }
 
 // ===== ARRÊTER TRAJET GPS =====
-async function stopGPSTrip() {
+function stopGPSTrip() {
     if (!tripData.active) return;
     
     tripData.endTime = new Date();
@@ -1353,21 +1099,25 @@ async function stopGPSTrip() {
             fiscalPower: userSettings.fiscalPower,
             annualKm: userSettings.annualKm
         },
-        notes: `Trajet GPS - ${tripData.distance.toFixed(2)} km réels - ${tripData.positions.length} points enregistrés`,
+        notes: `Trajet GPS - ${tripData.distance.toFixed(2)} km réels`,
         createdAt: new Date().toISOString(),
         synced: false
     };
     
-    await HybridStorage.saveDelivery(currentUser.username, delivery);
-    deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
+    deliveries.unshift(delivery);
+    LocalStorage.saveDeliveries(currentUser.username, deliveries);
     
+    // Sync vers cloud
+    CloudSync.syncDeliveries(currentUser.username);
+    
+    const savedDistance = tripData.distance;
     resetTrip();
     updateUI();
     
     document.getElementById('deliveryFormContainer').classList.add('hidden');
     document.getElementById('fabBtn').classList.remove('hidden');
     
-    showNotification(`✅ Trajet GPS enregistré !<br><small>${tripData.distance.toFixed(2)} km • ${payment.toFixed(2)} €</small>`);
+    showNotification(`✅ Trajet GPS enregistré !<br><small>${savedDistance.toFixed(2)} km • ${payment.toFixed(2)} €</small>`);
 }
 
 // ===== RESET TRAJET =====
@@ -1403,19 +1153,6 @@ function resetTrip() {
 // ===== GESTION ERREURS GPS =====
 function handleGPSError(error) {
     console.error('Erreur GPS:', error);
-    let message = 'Erreur GPS';
-    switch(error.code) {
-        case error.PERMISSION_DENIED:
-            message = 'Permission GPS refusée. Activez-la dans les paramètres de votre appareil.';
-            break;
-        case error.POSITION_UNAVAILABLE:
-            message = 'Position GPS non disponible';
-            break;
-        case error.TIMEOUT:
-            message = 'Timeout GPS';
-            break;
-    }
-    alert('⚠️ ' + message);
 }
 
 // ===== EVENT LISTENERS GPS =====
@@ -1522,6 +1259,23 @@ document.querySelectorAll('.theme-option').forEach(option => {
     });
 });
 
+// ===== BOUTON SYNC MANUEL =====
+function forceSync() {
+    if (!currentUser) return;
+    
+    showNotification('🔄 Synchronisation...', 'info');
+    
+    CloudSync.syncDeliveries(currentUser.username)
+        .then(() => {
+            deliveries = LocalStorage.getDeliveries(currentUser.username);
+            updateUI();
+            showNotification('✅ Synchronisation terminée !');
+        })
+        .catch(err => {
+            showNotification('❌ Erreur de synchronisation', 'error');
+        });
+}
+
 // ===== EXPORT EXCEL =====
 document.getElementById('btnExportExcel').addEventListener('click', () => {
     if (deliveries.length === 0) {
@@ -1531,14 +1285,12 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
 
     const totalKm = deliveries.reduce((sum, d) => sum + (d.distance || 0), 0);
     const baseTrajets = deliveries.reduce((sum, d) => sum + (d.payment || 0), 0);
-    
-    const partieFixe = typeof getPartieFixeAnnuelle === 'function' ? getPartieFixeAnnuelle(
+    const partieFixe = getPartieFixeAnnuelle(
         userSettings.vehicleType,
         userSettings.motorisation,
         userSettings.fiscalPower,
         userSettings.annualKm
-    ) : 0;
-    
+    );
     const totalAvecPartieFixe = baseTrajets + partieFixe;
 
     const data = [
@@ -1564,73 +1316,26 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
 
     data.push(['']);
     data.push(['TOTAUX', '', '', '', '', '', totalKm.toFixed(0), baseTrajets.toFixed(2), '']);
-    
     data.push(['']);
-    data.push(['DÉTAIL DU CALCUL FINANCIER', '', '', '', '']); 
-    data.push(['Base trajets cumulée (km × tarif)', '', '', '', baseTrajets.toFixed(2) + ' €']);
-    data.push(['Forfait annuel (selon barème)', '', '', '', partieFixe.toFixed(2) + ' €']);
-    data.push(['TOTAL GLOBAL', '', '', '', totalAvecPartieFixe.toFixed(2) + ' €']);
-    
-    data.push(['']);
-    data.push(['STATISTIQUES D\'ACTIVITÉ', '', '', '', '']);
-    data.push(['Nombre total de déplacements', '', '', '', deliveries.length]);
-    data.push(['Distance totale parcourue', '', '', '', totalKm.toFixed(0) + ' km']);
-    data.push(['Moyenne par trajet', '', '', '', (deliveries.length > 0 ? (totalKm / deliveries.length).toFixed(0) : 0) + ' km']);
+    data.push(['DÉTAIL DU CALCUL FINANCIER']);
+    data.push(['Base trajets', '', '', '', baseTrajets.toFixed(2) + ' €']);
+    data.push(['Forfait annuel', '', '', '', partieFixe.toFixed(2) + ' €']);
+    data.push(['TOTAL', '', '', '', totalAvecPartieFixe.toFixed(2) + ' €']);
 
     const ws = XLSX.utils.aoa_to_sheet(data);
-
     ws['!cols'] = [
-        { wch: 15 }, { wch: 25 }, { wch: 10 }, { wch: 10 },
-        { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 35 }
+        { wch: 12 }, { wch: 20 }, { wch: 8 }, { wch: 8 },
+        { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 30 }
     ];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
 
     const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
-
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const file = new File([blob], filename, { type: blob.type });
-
-    if (isMobile && navigator.canShare && navigator.canShare({ files: [file] })) {
-        const userChoice = confirm("Comment voulez-vous enregistrer le fichier ?\n\n[OK] = Choisir mon dossier (Partager)\n[Annuler] = Téléchargement rapide");
-
-        if (userChoice) {
-            navigator.share({
-                files: [file],
-                title: 'Export Route Note'
-            })
-            .then(() => showNotification('✅ Export réussi !'))
-            .catch((error) => console.log('Partage annulé', error));
-        } else {
-            XLSX.writeFile(wb, filename);
-            showNotification('✅ Fichier téléchargé !<br><small>Vérifiez votre dossier "Téléchargements".</small>');
-        }
-    } else {
-        XLSX.writeFile(wb, filename);
-        showNotification('✅ Fichier téléchargé !<br><small>Regardez dans votre dossier Téléchargements.</small>');
-    }
+    XLSX.writeFile(wb, filename);
+    
+    showNotification('✅ Export téléchargé !');
 });
-
-// ===== BOUTON SYNC MANUEL =====
-// Ajouter dans les settings pour forcer une sync
-async function forceSync() {
-    if (!currentUser) return;
-    
-    showNotification('🔄 Synchronisation en cours...', 'info');
-    
-    try {
-        await HybridStorage.syncDeliveriesToCloud(currentUser.username);
-        deliveries = HybridStorage.getLocalDeliveries(currentUser.username);
-        updateUI();
-        showNotification('✅ Synchronisation terminée !');
-    } catch (error) {
-        showNotification('❌ Erreur de synchronisation', 'error');
-    }
-}
 
 // ===== NAVIGATION =====
 document.querySelectorAll('.nav-item').forEach(item => {
@@ -1651,4 +1356,4 @@ document.querySelectorAll('.nav-item').forEach(item => {
     });
 });
 
-console.log('✅ Route Note PWA avec Supabase chargé !');
+console.log('✅ Route Note PWA v2 chargé !');
