@@ -21,12 +21,21 @@ if ('serviceWorker' in navigator) {
 
 // ===== INITIALISATION SUPABASE =====
 function initSupabase() {
-    if (window.supabase) {
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        console.log('✅ Supabase initialisé');
-        return true;
+    console.log('🔄 Tentative d\'initialisation Supabase...');
+    console.log('window.supabase existe ?', !!window.supabase);
+    
+    if (window.supabase && window.supabase.createClient) {
+        try {
+            supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            console.log('✅ Supabase initialisé avec succès');
+            console.log('URL:', SUPABASE_URL);
+            return true;
+        } catch (error) {
+            console.error('❌ Erreur création client Supabase:', error);
+            return false;
+        }
     }
-    console.warn('⚠️ SDK Supabase non chargé, mode hors ligne');
+    console.warn('⚠️ SDK Supabase non chargé, mode hors ligne activé');
     return false;
 }
 
@@ -70,32 +79,51 @@ class HybridStorage {
 
     // ===== SUPABASE AUTH =====
     static async signUp(email, password, username) {
-        if (!supabase) throw new Error('Mode hors ligne - inscription impossible');
+        console.log('📝 Tentative inscription...', { email, username });
         
-        const { data, error } = await supabase.auth.signUp({
-            email: email,
-            password: password,
-            options: {
-                data: { username: username }
+        if (!supabase) {
+            console.error('❌ Supabase non initialisé');
+            throw new Error('Mode hors ligne - inscription impossible. Vérifiez votre connexion internet.');
+        }
+        
+        try {
+            const { data, error } = await supabase.auth.signUp({
+                email: email,
+                password: password,
+                options: {
+                    data: { username: username }
+                }
+            });
+            
+            console.log('Réponse signUp:', { data, error });
+            
+            if (error) {
+                console.error('❌ Erreur Supabase signUp:', error);
+                throw error;
             }
-        });
-        
-        if (error) throw error;
-        
-        // Sauvegarder aussi en local pour le mode offline
-        const users = this.getLocalUsers();
-        users[username] = {
-            email: email,
-            password: btoa(password),
-            supabaseId: data.user?.id,
-            createdAt: new Date().toISOString()
-        };
-        this.saveLocalUsers(users);
-        
-        return data;
+            
+            // Sauvegarder aussi en local pour le mode offline
+            const users = this.getLocalUsers();
+            users[username] = {
+                email: email,
+                password: btoa(password),
+                supabaseId: data.user?.id,
+                createdAt: new Date().toISOString()
+            };
+            this.saveLocalUsers(users);
+            
+            console.log('✅ Inscription réussie');
+            return data;
+            
+        } catch (err) {
+            console.error('❌ Exception signUp:', err);
+            throw err;
+        }
     }
 
     static async signIn(emailOrUsername, password) {
+        console.log('🔐 Tentative connexion...', { emailOrUsername });
+        
         // Essayer d'abord Supabase
         if (supabase) {
             try {
@@ -104,27 +132,37 @@ class HybridStorage {
                 if (!emailOrUsername.includes('@')) {
                     // C'est un username, chercher l'email en local
                     const users = this.getLocalUsers();
+                    console.log('Users locaux:', Object.keys(users));
                     if (users[emailOrUsername]?.email) {
                         email = users[emailOrUsername].email;
+                        console.log('Email trouvé pour username:', email);
                     } else {
-                        // Pas d'email trouvé, essayer en mode local uniquement
+                        console.log('Pas d\'email trouvé, essai mode local');
                         throw new Error('Username sans email associé');
                     }
                 }
 
+                console.log('Connexion Supabase avec email:', email);
                 const { data, error } = await supabase.auth.signInWithPassword({
                     email: email,
                     password: password
                 });
                 
-                if (error) throw error;
+                console.log('Réponse signIn:', { data, error });
+                
+                if (error) {
+                    console.error('❌ Erreur Supabase signIn:', error);
+                    throw error;
+                }
                 
                 // Récupérer le profil depuis Supabase
-                const { data: profile } = await supabase
+                const { data: profile, error: profileError } = await supabase
                     .from('profiles')
                     .select('*')
                     .eq('id', data.user.id)
                     .single();
+                
+                console.log('Profil récupéré:', { profile, profileError });
                 
                 const username = profile?.username || emailOrUsername.split('@')[0];
                 
@@ -153,6 +191,7 @@ class HybridStorage {
                 // Sync les livraisons depuis Supabase
                 await this.syncDeliveriesFromCloud(username, data.user.id);
                 
+                console.log('✅ Connexion Supabase réussie');
                 return { 
                     user: data.user, 
                     username: username,
@@ -160,8 +199,11 @@ class HybridStorage {
                 };
                 
             } catch (error) {
-                console.warn('⚠️ Connexion Supabase échouée, essai local:', error.message);
+                console.warn('⚠️ Connexion Supabase échouée:', error.message);
+                console.log('Tentative connexion locale...');
             }
+        } else {
+            console.log('Supabase non disponible, mode local');
         }
         
         // Fallback : connexion locale
