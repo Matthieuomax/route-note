@@ -997,7 +997,7 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
 
         if (isIOS && navigator.canShare?.({ files: [file] })) {
             // iOS 15+ : feuille de partage native → "Enregistrer dans Fichiers"
-            navigator.share({ files: [file], title: filename }).catch(() => {
+            navigator.share({ files: [file] }).catch(() => {
                 const url = URL.createObjectURL(blob);
                 window.open(url, '_blank');
                 setTimeout(() => URL.revokeObjectURL(url), 10000);

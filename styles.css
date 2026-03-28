@@ -196,7 +196,8 @@ label:has(input[type="radio"]:checked) span {
 .welcome-steps{display:flex;flex-direction:column;gap:16px;text-align:left;margin-bottom:20px}
 .welcome-step{display:flex;align-items:flex-start;gap:14px;background:var(--gray-50);padding:14px;border-radius:14px}
 .step-num{font-size:24px;flex-shrink:0;margin-top:2px}
-.welcome-step strong{display:block;font-size:14px;font-weight:700;color:var(--gray-900);margin-bottom:4px}
+.welcome-step > div > strong{display:block;font-size:14px;font-weight:700;color:var(--gray-900);margin-bottom:4px}
+.welcome-step p strong{display:inline;font-weight:700}
 .welcome-step p{font-size:13px;color:var(--gray-600);margin:0;line-height:1.5}
 
 /* Auth toggle */
