@@ -1007,7 +1007,7 @@ document.getElementById('btnExportExcel').addEventListener('click', async () => 
                 ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"' +
                 ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
                 '<xdr:oneCellAnchor>' +
-                '<xdr:from><xdr:col>7</xdr:col><xdr:colOff>114300</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>114300</xdr:rowOff></xdr:from>' +
+                '<xdr:from><xdr:col>7</xdr:col><xdr:colOff>114300</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>19050</xdr:rowOff></xdr:from>' +
                 '<xdr:ext cx="600000" cy="600000"/>' +
                 '<xdr:pic>' +
                 '<xdr:nvPicPr><xdr:cNvPr id="2" name="Logo"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>' +
@@ -1090,7 +1090,7 @@ document.getElementById('btnExportExcel').addEventListener('click', async () => 
 });
 
 // ===== EXPORT PDF =====
-document.getElementById('btnExportPdf').addEventListener('click', () => {
+document.getElementById('btnExportPdf').addEventListener('click', async () => {
     if (deliveries.length === 0) { alert('⚠️ Aucune donnée à exporter !'); return; }
 
     const totalKm = deliveries.reduce((s, d) => s + (d.distance || 0), 0);
@@ -1098,6 +1098,17 @@ document.getElementById('btnExportPdf').addEventListener('click', () => {
     const partieFixe = getPartieFixeAnnuelle(userSettings.vehicleType, userSettings.motorisation, userSettings.fiscalPower, userSettings.annualKm);
     const totalAvecPartieFixe = baseTrajets + partieFixe;
     const today = new Date().toLocaleDateString('fr-FR', { day:'numeric', month:'long', year:'numeric' });
+
+    // Pré-charger le logo en base64 pour que print() l'affiche sans délai réseau
+    let logoSrc = 'icons/logo-display-512.png';
+    try {
+        const resp = await fetch('icons/logo-display-512.png');
+        if (resp.ok) {
+            const buf = await resp.arrayBuffer();
+            const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+            logoSrc = `data:image/png;base64,${b64}`;
+        }
+    } catch(e) { /* on garde l'URL relative en fallback */ }
 
     const rows = deliveries.map(d => `
         <tr>
@@ -1114,7 +1125,7 @@ document.getElementById('btnExportPdf').addEventListener('click', () => {
 
     document.getElementById('printContent').innerHTML = `
         <div class="print-header">
-            <img src="icons/logo-display-512.png" class="print-logo" alt="Route Note">
+            <img src="${logoSrc}" class="print-logo" alt="Route Note">
             <div class="print-header-text">
                 <h1>Route Note — Rapport de déplacements</h1>
                 <p>${escapeHtml(currentUser.username)} · Généré le ${today} · ${deliveries.length} trajet${deliveries.length > 1 ? 's' : ''}</p>
