@@ -1000,22 +1000,22 @@ document.getElementById('btnExportExcel').addEventListener('click', async () => 
             // Image dans xl/media/
             zip.file('xl/media/logo.png', logoBytes);
 
-            // XML du dessin (logo ancré en haut à droite, colonnes H-I, lignes 1-3)
+            // XML du dessin — oneCellAnchor avec cx=cy pour garder le logo carré
             zip.file('xl/drawings/drawing1.xml',
                 '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
                 '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"' +
                 ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"' +
                 ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-                '<xdr:twoCellAnchor editAs="oneCell">' +
-                '<xdr:from><xdr:col>7</xdr:col><xdr:colOff>76200</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>76200</xdr:rowOff></xdr:from>' +
-                '<xdr:to><xdr:col>8</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>' +
+                '<xdr:oneCellAnchor>' +
+                '<xdr:from><xdr:col>7</xdr:col><xdr:colOff>114300</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>114300</xdr:rowOff></xdr:from>' +
+                '<xdr:ext cx="600000" cy="600000"/>' +
                 '<xdr:pic>' +
                 '<xdr:nvPicPr><xdr:cNvPr id="2" name="Logo"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>' +
                 '<xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>' +
-                '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm>' +
+                '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="600000" cy="600000"/></a:xfrm>' +
                 '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>' +
                 '</xdr:pic><xdr:clientData/>' +
-                '</xdr:twoCellAnchor></xdr:wsDr>'
+                '</xdr:oneCellAnchor></xdr:wsDr>'
             );
 
             // Relations du dessin → image
@@ -1087,6 +1087,57 @@ document.getElementById('btnExportExcel').addEventListener('click', async () => 
         setTimeout(() => URL.revokeObjectURL(url), 5000);
     }
     showNotification('✅ Export téléchargé !');
+});
+
+// ===== EXPORT PDF =====
+document.getElementById('btnExportPdf').addEventListener('click', () => {
+    if (deliveries.length === 0) { alert('⚠️ Aucune donnée à exporter !'); return; }
+
+    const totalKm = deliveries.reduce((s, d) => s + (d.distance || 0), 0);
+    const baseTrajets = deliveries.reduce((s, d) => s + (d.payment || 0), 0);
+    const partieFixe = getPartieFixeAnnuelle(userSettings.vehicleType, userSettings.motorisation, userSettings.fiscalPower, userSettings.annualKm);
+    const totalAvecPartieFixe = baseTrajets + partieFixe;
+    const today = new Date().toLocaleDateString('fr-FR', { day:'numeric', month:'long', year:'numeric' });
+
+    const rows = deliveries.map(d => `
+        <tr>
+            <td>${escapeHtml(d.date || '')}</td>
+            <td>${escapeHtml(d.clientName || '')}</td>
+            <td>${escapeHtml(d.startTime || '')}</td>
+            <td>${escapeHtml(d.endTime || '')}</td>
+            <td style="text-align:right">${d.startKm || 0}</td>
+            <td style="text-align:right">${d.endKm || 0}</td>
+            <td style="text-align:right">${(d.distance || 0).toFixed(0)}</td>
+            <td style="text-align:right">${(d.payment || 0).toFixed(2)} €</td>
+            <td>${escapeHtml(d.notes || '')}</td>
+        </tr>`).join('');
+
+    document.getElementById('printContent').innerHTML = `
+        <div class="print-header">
+            <img src="icons/logo-display-512.png" class="print-logo" alt="Route Note">
+            <div class="print-header-text">
+                <h1>Route Note — Rapport de déplacements</h1>
+                <p>${escapeHtml(currentUser.username)} · Généré le ${today} · ${deliveries.length} trajet${deliveries.length > 1 ? 's' : ''}</p>
+            </div>
+        </div>
+        <table class="print-table">
+            <thead>
+                <tr>
+                    <th>Date</th><th>Motif</th><th>Départ</th><th>Arrivée</th>
+                    <th>Km départ</th><th>Km arrivée</th><th>Distance</th><th>Indemnité</th><th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <div class="print-totals">
+            <div class="print-total-row"><span>Distance totale</span><strong>${totalKm.toFixed(1)} km</strong></div>
+            <div class="print-total-row"><span>Indemnités trajets</span><strong>${baseTrajets.toFixed(2)} €</strong></div>
+            ${partieFixe > 0 ? `<div class="print-total-row"><span>Partie fixe annuelle</span><strong>${partieFixe.toFixed(2)} €</strong></div>` : ''}
+            <div class="print-total-row print-total-final"><span>Total remboursement</span><strong>${totalAvecPartieFixe.toFixed(2)} €</strong></div>
+        </div>`;
+
+    window.print();
+    showNotification('✅ Impression lancée !');
 });
 
 // ===== NAVIGATION =====

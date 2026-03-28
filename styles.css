@@ -34,7 +34,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
 .auth-title{text-align:center;font-size:28px;font-weight:700;margin-bottom:6px;background:linear-gradient(135deg,var(--primary),var(--secondary));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
 
-.auth-subtitle{text-align:center;color:var(--gray-500);margin-bottom:24px;font-size:14px}
+.auth-subtitle{text-align:center;color:var(--gray-500);margin-bottom:12px;font-size:14px}
+
+.install-hint{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;padding:10px 14px;border-radius:8px;margin-bottom:16px;text-align:center;font-size:12px;line-height:1.6}
+.install-hint strong{font-weight:700}
+.share-icon-svg{display:inline;width:12px;height:14px;vertical-align:-2px;margin:0 1px}
 
 /* Forms */
 .form-group{margin-bottom:16px}
@@ -231,9 +235,37 @@ label:has(input[type="radio"]:checked) span {
 @keyframes fadeInBackdrop{from{opacity:0}to{opacity:1}}
 @keyframes slideUpSheet{from{transform:translateY(100%)}to{transform:translateY(0)}}
 
+/* Export buttons */
+.export-btns{display:flex;gap:10px}
+.btn-pdf{background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff;border:none;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;transition:all .3s;display:flex;align-items:center;justify-content:center;gap:8px;touch-action:manipulation}
+.btn-pdf:active{transform:scale(.98)}
+
 /* Very small screens */
 @media(max-width:380px){
 .app-title{font-size:20px}
 .stat-value{font-size:18px}
 .delivery-client{font-size:14px}
+}
+
+/* ===== IMPRESSION / PDF ===== */
+#printContent{display:none}
+@media print{
+    body > *:not(#printContent){display:none!important}
+    #printContent{display:block!important;font-family:Arial,Helvetica,sans-serif;padding:20px;color:#111}
+    .print-header{display:flex;align-items:center;gap:16px;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #2563eb}
+    .print-logo{width:52px;height:52px;object-fit:contain;flex-shrink:0}
+    .print-header-text h1{font-size:18px;font-weight:700;color:#2563eb;margin:0 0 3px}
+    .print-header-text p{font-size:10px;color:#6b7280;margin:0}
+    .print-table{width:100%;border-collapse:collapse;font-size:9px;margin-bottom:20px}
+    .print-table th{background:#2563eb;color:#fff;padding:6px 4px;text-align:center;font-weight:600}
+    .print-table td{padding:5px 4px;border-bottom:1px solid #e5e7eb;vertical-align:top}
+    .print-table tr:nth-child(even) td{background:#f0f4ff}
+    .print-totals{max-width:320px;margin-left:auto;border:1.5px solid #2563eb;border-radius:8px;padding:12px}
+    .print-total-row{display:flex;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid #e5e7eb}
+    .print-total-row:last-child{border-bottom:none}
+    .print-total-row span{color:#374151}
+    .print-total-row strong{color:#111;font-weight:700}
+    .print-total-final{margin-top:4px;padding-top:8px;border-top:2px solid #2563eb!important;font-size:13px!important}
+    .print-total-final span{color:#2563eb;font-weight:700}
+    .print-total-final strong{color:#059669;font-size:14px}
 }
