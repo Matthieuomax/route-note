@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#2563eb">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -12,10 +12,10 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     
     <!-- SDK Supabase -->
-    <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase-js.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
     
-    <!-- XLSX pour export Excel -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- XLSX avec styles pour export Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js" defer></script>
     
     <link rel="stylesheet" href="styles.css">
     
@@ -100,15 +100,26 @@
             to { transform: translateX(-50%) translateY(-20px); opacity: 0; }
         }
         
-        /* Email field pour inscription */
-        .auth-info {
-            font-size: 12px;
-            color: var(--gray-500);
+        /* Style toggle auth */
+        .auth-toggle {
             text-align: center;
             margin-top: 16px;
-            padding: 12px;
-            background: var(--gray-50);
-            border-radius: 8px;
+            font-size: 13px;
+            color: var(--gray-500);
+        }
+        .auth-toggle a {
+            color: var(--primary);
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .auth-toggle a:hover {
+            text-decoration: underline;
+        }
+        .password-hint {
+            font-size: 11px;
+            color: var(--gray-500);
+            margin-top: 4px;
         }
     </style>
 </head>
@@ -122,6 +133,7 @@
             <div id="authError" class="error-message hidden"></div>
             <div id="authSuccess" class="success-message hidden"></div>
             
+            <!-- Formulaire de connexion -->
             <form id="loginForm">
                 <div class="form-group">
                     <label class="form-label">Prénom ou pseudo</label>
@@ -132,9 +144,31 @@
                     <input type="password" class="form-input" id="loginPassword" required autocomplete="current-password">
                 </div>
                 <button type="submit" class="btn btn-primary">Se connecter</button>
-                <button type="button" class="btn btn-secondary" id="switchToRegister">Créer un compte</button>
             </form>
-            
+
+            <!-- Formulaire d'inscription -->
+            <form id="registerForm" class="hidden">
+                <div class="form-group">
+                    <label class="form-label">Prénom ou pseudo</label>
+                    <input type="text" class="form-input" id="registerUsername" required autocomplete="username" placeholder="Votre pseudo...">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Mot de passe</label>
+                    <input type="password" class="form-input" id="registerPassword" required autocomplete="new-password" placeholder="Min. 6 caractères">
+                    <p class="password-hint">Au moins 6 caractères</p>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Confirmer le mot de passe</label>
+                    <input type="password" class="form-input" id="registerPasswordConfirm" required autocomplete="new-password" placeholder="Retapez le mot de passe">
+                </div>
+                <button type="submit" class="btn btn-primary">Créer mon compte</button>
+            </form>
+
+            <!-- Toggle login / register -->
+            <div class="auth-toggle">
+                <span id="toggleToRegister">Pas encore de compte ? <a>Créer un compte</a></span>
+                <span id="toggleToLogin" class="hidden">Déjà un compte ? <a>Se connecter</a></span>
+            </div>
         </div>
     </div>
 
@@ -340,7 +374,7 @@
                 <div class="form-group">
                     <label class="form-label">
                         Chevaux fiscaux (CV)
-                        <a href="https://www.impots.gouv.fr/particulier/questions/comment-determiner-la-puissance-fiscale-de-mon-vehicule-electrique-pour-le" target="_blank" style="font-size: 11px; color: var(--primary); text-decoration: none; margin-left: 8px;">
+                        <a href="https://www.impots.gouv.fr/particulier/questions/comment-determiner-la-puissance-fiscale-de-mon-vehicule-electrique-pour-le" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: var(--primary); text-decoration: none; margin-left: 8px;">
                             ℹ️ Comment trouver mes CV ?
                         </a>
                     </label>
@@ -399,7 +433,7 @@
             <button type="button" class="btn btn-secondary" id="logoutBtn" style="background: linear-gradient(135deg, #fee2e2, #fecaca); color: var(--danger);">Déconnexion</button>
         </div>
 
-        <button class="fab" id="fabBtn">+</button>
+        <button class="fab" id="fabBtn" aria-label="Ajouter un déplacement">+</button>
 
         <div class="bottom-nav">
             <button class="nav-item active" data-view="dashboard">
@@ -413,45 +447,6 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
-    
-    <script>
-        // Event listener pour le bouton sync manuel
-        document.getElementById('btnForceSync')?.addEventListener('click', async function() {
-            this.disabled = true;
-            this.textContent = '🔄 Synchronisation...';
-            
-            try {
-                await forceSync();
-                document.getElementById('syncStatus').textContent = 
-                    'Dernière sync : ' + new Date().toLocaleTimeString('fr-FR');
-            } catch (error) {
-                console.error('Erreur sync:', error);
-            } finally {
-                this.disabled = false;
-                this.textContent = '🔄 Synchroniser maintenant';
-            }
-        });
-        
-        // Mettre à jour l'indicateur de connexion
-        function updateConnectionUI() {
-            const indicator = document.getElementById('connectionIndicator');
-            const text = document.getElementById('connectionText');
-            
-            if (navigator.onLine) {
-                indicator.className = 'connection-indicator online';
-                text.textContent = 'En ligne - Sync activée';
-            } else {
-                indicator.className = 'connection-indicator offline';
-                text.textContent = 'Hors ligne - Données locales';
-            }
-        }
-        
-        window.addEventListener('online', updateConnectionUI);
-        window.addEventListener('offline', updateConnectionUI);
-        
-        // Initial check
-        setTimeout(updateConnectionUI, 1000);
-    </script>
+    <script src="app.js" defer></script>
 </body>
 </html>
