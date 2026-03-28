@@ -250,6 +250,7 @@ label:has(input[type="radio"]:checked) span {
 /* ===== IMPRESSION / PDF ===== */
 #printContent{display:none}
 @media print{
+    html,body{background:white!important;background-image:none!important;min-height:0!important;height:auto!important;margin:0!important;padding:0!important}
     body > *:not(#printContent){display:none!important}
     #printContent{display:block!important;font-family:Arial,Helvetica,sans-serif;padding:20px;color:#111}
     .print-header{display:flex;align-items:center;gap:16px;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #2563eb}
