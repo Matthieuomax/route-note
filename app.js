@@ -904,7 +904,7 @@ async function forceSync() {
 }
 
 // ===== EXPORT EXCEL =====
-document.getElementById('btnExportExcel').addEventListener('click', () => {
+document.getElementById('btnExportExcel').addEventListener('click', async () => {
     if (deliveries.length === 0) { alert('⚠️ Aucune donnée à exporter !'); return; }
 
     const totalKm = deliveries.reduce((s, d) => s + (d.distance || 0), 0);
@@ -987,36 +987,104 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
     const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
+    // ---- Générer le xlsx en binaire ----
+    let wbBytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
+    // ---- Injecter le logo PNG dans le fichier xlsx via JSZip ----
+    try {
+        const logoResp = await fetch('icons/logo-display-512.png');
+        if (logoResp.ok && typeof JSZip !== 'undefined') {
+            const logoBytes = new Uint8Array(await logoResp.arrayBuffer());
+            const zip = await JSZip.loadAsync(wbBytes);
+
+            // Image dans xl/media/
+            zip.file('xl/media/logo.png', logoBytes);
+
+            // XML du dessin (logo ancré en haut à droite, colonnes H-I, lignes 1-3)
+            zip.file('xl/drawings/drawing1.xml',
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"' +
+                ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"' +
+                ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+                '<xdr:twoCellAnchor editAs="oneCell">' +
+                '<xdr:from><xdr:col>7</xdr:col><xdr:colOff>76200</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>76200</xdr:rowOff></xdr:from>' +
+                '<xdr:to><xdr:col>8</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>' +
+                '<xdr:pic>' +
+                '<xdr:nvPicPr><xdr:cNvPr id="2" name="Logo"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>' +
+                '<xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>' +
+                '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm>' +
+                '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>' +
+                '</xdr:pic><xdr:clientData/>' +
+                '</xdr:twoCellAnchor></xdr:wsDr>'
+            );
+
+            // Relations du dessin → image
+            zip.file('xl/drawings/_rels/drawing1.xml.rels',
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.png"/>' +
+                '</Relationships>'
+            );
+
+            // Relations de sheet1 → dessin
+            const existingRels = await zip.file('xl/worksheets/_rels/sheet1.xml.rels')?.async('string');
+            const drawingRel = '<Relationship Id="rId_d1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>';
+            zip.file('xl/worksheets/_rels/sheet1.xml.rels',
+                existingRels
+                    ? existingRels.replace('</Relationships>', drawingRel + '</Relationships>')
+                    : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                      drawingRel + '</Relationships>'
+            );
+
+            // Référencer le dessin dans sheet1.xml
+            let sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+            if (!sheetXml.includes('xmlns:r=')) {
+                sheetXml = sheetXml.replace('<worksheet ', '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
+            }
+            if (!sheetXml.includes('<drawing')) {
+                sheetXml = sheetXml.replace('</worksheet>', '<drawing r:id="rId_d1"/></worksheet>');
+            }
+            zip.file('xl/worksheets/sheet1.xml', sheetXml);
+
+            // Déclarer le type de contenu pour le dessin
+            let ct = await zip.file('[Content_Types].xml').async('string');
+            if (!ct.includes('drawing+xml')) {
+                ct = ct.replace('</Types>',
+                    '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>');
+            }
+            zip.file('[Content_Types].xml', ct);
+
+            wbBytes = new Uint8Array(await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } }));
+        }
+    } catch(e) { console.warn('Logo Excel non injecté :', e); }
+
+    // ---- Téléchargement ----
+    const blob = new Blob([wbBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const file = new File([blob], filename, { type: blob.type });
     const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
-    const isAndroid = /Android/i.test(navigator.userAgent);
 
-    if (isIOS || isAndroid) {
-        const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-        const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const file = new File([blob], filename, { type: blob.type });
-
-        if (isIOS && navigator.canShare?.({ files: [file] })) {
-            // iOS 15+ : feuille de partage native → "Enregistrer dans Fichiers"
-            navigator.share({ files: [file] }).catch(() => {
+    if (isIOS && navigator.share) {
+        // iOS/iPadOS : feuille de partage native
+        navigator.share({ files: [file] }).catch(err => {
+            if (err.name !== 'AbortError') {
                 const url = URL.createObjectURL(blob);
                 window.open(url, '_blank');
                 setTimeout(() => URL.revokeObjectURL(url), 10000);
-            });
-        } else if (isAndroid) {
-            // Android : lien blob avec attribut download
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = filename;
-            document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 5000);
-        } else {
-            // iOS fallback (ancienne version) : ouvre dans Safari → "Ouvrir dans…"
-            const url = URL.createObjectURL(blob);
-            window.open(url, '_blank');
-            setTimeout(() => URL.revokeObjectURL(url), 10000);
-        }
+            }
+        });
+    } else if (isIOS) {
+        // iOS sans Share API (très ancien Safari)
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
     } else {
-        XLSX.writeFile(wb, filename);
+        // Android + Desktop : lien download standard
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
     }
     showNotification('✅ Export téléchargé !');
 });

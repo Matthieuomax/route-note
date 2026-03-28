@@ -16,6 +16,8 @@
     
     <!-- XLSX avec styles pour export Excel -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js" defer></script>
+    <!-- JSZip pour injection du logo dans l'Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
     
     <link rel="stylesheet" href="styles.css">
     
@@ -23,7 +25,7 @@
 <body class="theme-blue">
     <div id="authPage" class="auth-container">
         <div class="auth-card">
-            <div class="auth-logo">🚚</div>
+            <img src="icons/logo-display-512.png" class="auth-logo" alt="Route Note">
             <h1 class="auth-title">Route Note</h1>
             <p class="auth-subtitle">Gestion de vos déplacements</p>
             
@@ -72,9 +74,12 @@
     <div id="appPage" class="hidden">
         <div id="dashboardView" class="container">
             <div class="app-header">
-                <h1 class="app-title">Tableau de bord</h1>
-                <p class="app-subtitle" id="currentDate"></p>
-                <p class="user-info" id="userName"></p>
+                <div class="app-header-text">
+                    <h1 class="app-title">Tableau de bord</h1>
+                    <p class="app-subtitle" id="currentDate"></p>
+                    <p class="user-info" id="userName"></p>
+                </div>
+                <img src="icons/logo-display-512.png" class="header-logo" alt="Route Note">
             </div>
 
             <div class="stats-grid">
@@ -328,7 +333,7 @@
             <div class="modal-backdrop" onclick="closeWelcomeModal()"></div>
             <div class="modal-sheet welcome-sheet">
                 <div class="modal-handle"></div>
-                <div class="welcome-icon-wrap">🚗</div>
+                <img src="icons/logo-display-512.png" class="welcome-logo" alt="Route Note">
                 <h2 class="welcome-title">Bienvenue sur Route Note !</h2>
                 <p class="welcome-intro">Prêt à suivre vos déplacements ? Voici comment démarrer en 3 étapes.</p>
 
