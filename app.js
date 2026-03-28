@@ -653,10 +653,17 @@ function deleteDelivery(id) {
     CloudSync.deleteDelivery(currentUser.username, id);
 }
 
+// ===== MODAL DÉPLACEMENT =====
+function openDeliveryModal() {
+    document.getElementById('deliveryFormContainer').classList.add('open');
+}
+function closeDeliveryModal() {
+    document.getElementById('deliveryFormContainer').classList.remove('open');
+}
+
 // ===== FAB =====
 document.getElementById('fabBtn').addEventListener('click', () => {
-    document.getElementById('deliveryFormContainer').classList.remove('hidden');
-    document.getElementById('fabBtn').classList.add('hidden');
+    openDeliveryModal();
     if (deliveries.length > 0 && deliveries[0].endKm) {
         document.getElementById('deliveryStartKm').value = deliveries[0].endKm;
     }
@@ -664,16 +671,14 @@ document.getElementById('fabBtn').addEventListener('click', () => {
 });
 
 document.getElementById('cancelDeliveryBtn').addEventListener('click', () => {
-    document.getElementById('deliveryFormContainer').classList.add('hidden');
-    document.getElementById('fabBtn').classList.remove('hidden');
+    closeDeliveryModal();
     document.getElementById('deliveryForm').reset();
     document.getElementById('deliveryDate').value = new Date().toISOString().split('T')[0];
 });
 
 document.getElementById('cancelAutoBtn').addEventListener('click', () => {
     resetTrip();
-    document.getElementById('deliveryFormContainer').classList.add('hidden');
-    document.getElementById('fabBtn').classList.remove('hidden');
+    closeDeliveryModal();
 });
 
 // ===== MODE SWITCH =====
@@ -742,8 +747,7 @@ document.getElementById('deliveryForm').addEventListener('submit', (e) => {
     LocalStorage.saveDeliveries(currentUser.username, deliveries);
     CloudSync.syncDeliveries(currentUser.username);
     updateUI();
-    document.getElementById('deliveryFormContainer').classList.add('hidden');
-    document.getElementById('fabBtn').classList.remove('hidden');
+    closeDeliveryModal();
     document.getElementById('deliveryForm').reset();
     document.getElementById('deliveryDate').value = new Date().toISOString().split('T')[0];
     showNotification('✅ Déplacement enregistré !');
@@ -818,8 +822,7 @@ function stopGPSTrip() {
     CloudSync.syncDeliveries(currentUser.username);
     const savedDist = tripData.distance;
     resetTrip(); updateUI();
-    document.getElementById('deliveryFormContainer').classList.add('hidden');
-    document.getElementById('fabBtn').classList.remove('hidden');
+    closeDeliveryModal();
     showNotification(`✅ Trajet GPS enregistré !<br><small>${savedDist.toFixed(2)} km • ${payment.toFixed(2)} €</small>`);
 }
 
@@ -890,25 +893,83 @@ async function forceSync() {
 // ===== EXPORT EXCEL =====
 document.getElementById('btnExportExcel').addEventListener('click', () => {
     if (deliveries.length === 0) { alert('⚠️ Aucune donnée à exporter !'); return; }
+
     const totalKm = deliveries.reduce((s, d) => s + (d.distance || 0), 0);
     const baseTrajets = deliveries.reduce((s, d) => s + (d.payment || 0), 0);
     const partieFixe = getPartieFixeAnnuelle(userSettings.vehicleType, userSettings.motorisation, userSettings.fiscalPower, userSettings.annualKm);
     const totalAvecPartieFixe = baseTrajets + partieFixe;
 
-    const data = [
-        ['ROUTE NOTE - ' + currentUser.username.toUpperCase()],
-        ['Généré le : ' + new Date().toLocaleString('fr-FR')], [''],
-        ['Date', 'Client', 'Début', 'Fin', 'Km Départ', 'Km Arrivée', 'Distance (km)', 'Paiement (€)', 'Notes']
+    // ---- Données brutes ----
+    const rows = [
+        ['ROUTE NOTE - ' + currentUser.username.toUpperCase(), '', '', '', '', '', '', '', ''],
+        ['Généré le : ' + new Date().toLocaleString('fr-FR'), '', '', '', '', '', '', '', ''],
+        [],
+        ['Date', 'Motif', 'Départ', 'Arrivée', 'Km Départ', 'Km Arrivée', 'Distance (km)', 'Indemnité (€)', 'Notes']
     ];
-    deliveries.forEach(d => data.push([d.date, d.clientName||'', d.startTime||'', d.endTime||'', d.startKm||0, d.endKm||0, d.distance?.toFixed(0)||0, d.payment?.toFixed(2)||0, d.notes||'']));
-    data.push([''], ['TOTAUX','','','','','', totalKm.toFixed(0), baseTrajets.toFixed(2), '']);
-    data.push([''], ['DÉTAIL DU CALCUL FINANCIER']);
-    data.push(['Base trajets','','','', baseTrajets.toFixed(2)+' €']);
-    data.push(['Forfait annuel','','','', partieFixe.toFixed(2)+' €']);
-    data.push(['TOTAL','','','', totalAvecPartieFixe.toFixed(2)+' €']);
+    deliveries.forEach(d => rows.push([
+        d.date, d.clientName || '', d.startTime || '', d.endTime || '',
+        d.startKm || 0, d.endKm || 0,
+        parseFloat(d.distance?.toFixed(0)) || 0,
+        parseFloat(d.payment?.toFixed(2)) || 0,
+        d.notes || ''
+    ]));
+    const dataEndRow = rows.length;
+    rows.push([]);
+    rows.push(['TOTAUX', '', '', '', '', '', parseFloat(totalKm.toFixed(0)), parseFloat(baseTrajets.toFixed(2)), '']);
+    rows.push([]);
+    rows.push(['DÉTAIL DU CALCUL FINANCIER', '', '', '', '', '', '', '', '']);
+    rows.push(['Base trajets (variable)', '', '', '', parseFloat(baseTrajets.toFixed(2)), '', '', '', '']);
+    rows.push(['Forfait annuel (fixe)', '', '', '', parseFloat(partieFixe.toFixed(2)), '', '', '', '']);
+    rows.push(['TOTAL ANNUEL', '', '', '', parseFloat(totalAvecPartieFixe.toFixed(2)), '', '', '', '']);
 
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    ws['!cols'] = [{wch:12},{wch:20},{wch:8},{wch:8},{wch:10},{wch:10},{wch:12},{wch:12},{wch:30}];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // ---- Styles ----
+    const setStyle = (r, c, s) => {
+        const key = XLSX.utils.encode_cell({ r, c });
+        if (!ws[key]) ws[key] = { v: '', t: 's' };
+        ws[key].s = s;
+    };
+
+    const S = {
+        title:    { font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '2563EB' } }, alignment: { horizontal: 'center' } },
+        subtitle: { font: { italic: true, sz: 10, color: { rgb: '6B7280' } }, alignment: { horizontal: 'center' } },
+        header:   { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '1E40AF' } }, alignment: { horizontal: 'center', wrapText: true } },
+        rowEven:  { fill: { patternType: 'solid', fgColor: { rgb: 'F0F4FF' } }, font: { sz: 10 } },
+        rowOdd:   { fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } }, font: { sz: 10 } },
+        rowNum:   bg => ({ fill: { patternType: 'solid', fgColor: { rgb: bg } }, font: { sz: 10 }, alignment: { horizontal: 'right' } }),
+        totalLbl: { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '059669' } } },
+        totalVal: { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '059669' } }, alignment: { horizontal: 'right' } },
+        section:  { font: { bold: true, sz: 12, color: { rgb: '1E40AF' } }, fill: { patternType: 'solid', fgColor: { rgb: 'DBEAFE' } } },
+        sumLbl:   { font: { bold: true, sz: 11, color: { rgb: '374151' } } },
+        sumVal:   { font: { bold: true, sz: 11, color: { rgb: '059669' } }, alignment: { horizontal: 'right' } },
+        finalLbl: { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '059669' } } },
+        finalVal: { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '059669' } }, alignment: { horizontal: 'right' } },
+    };
+
+    for (let c = 0; c < 9; c++) setStyle(0, c, S.title);
+    for (let c = 0; c < 9; c++) setStyle(1, c, S.subtitle);
+    for (let c = 0; c < 9; c++) setStyle(3, c, S.header);
+    for (let r = 4; r < dataEndRow; r++) {
+        const bg = r % 2 === 0 ? 'F0F4FF' : 'FFFFFF';
+        for (let c = 0; c < 9; c++) setStyle(r, c, c >= 4 ? S.rowNum(bg) : (r % 2 === 0 ? S.rowEven : S.rowOdd));
+    }
+    const totalRow = dataEndRow + 1;
+    for (let c = 0; c < 9; c++) setStyle(totalRow, c, c < 6 ? S.totalLbl : S.totalVal);
+    const sectionRow = totalRow + 2;
+    for (let c = 0; c < 9; c++) setStyle(sectionRow, c, S.section);
+    setStyle(sectionRow + 1, 0, S.sumLbl); setStyle(sectionRow + 1, 4, S.sumVal);
+    setStyle(sectionRow + 2, 0, S.sumLbl); setStyle(sectionRow + 2, 4, S.sumVal);
+    for (let c = 0; c < 9; c++) setStyle(sectionRow + 3, c, c === 4 ? S.finalVal : S.finalLbl);
+
+    ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 8 } },
+        { s: { r: sectionRow, c: 0 }, e: { r: sectionRow, c: 8 } },
+    ];
+    ws['!cols'] = [{wch:12},{wch:22},{wch:8},{wch:8},{wch:10},{wch:10},{wch:13},{wch:14},{wch:30}];
+    ws['!rows'] = [{hpt:22},{hpt:16}];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
     XLSX.writeFile(wb, `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`);
@@ -924,7 +985,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
         document.getElementById('dashboardView').classList.toggle('hidden', view !== 'dashboard');
         document.getElementById('settingsView').classList.toggle('hidden', view !== 'settings');
         document.getElementById('fabBtn').classList.toggle('hidden', view !== 'dashboard');
-        if (view !== 'dashboard') document.getElementById('deliveryFormContainer').classList.add('hidden');
+        if (view !== 'dashboard') closeDeliveryModal();
     });
 });
 
@@ -946,5 +1007,13 @@ document.getElementById('btnForceSync')?.addEventListener('click', async functio
 window.addEventListener('online', updateConnectionUI);
 window.addEventListener('offline', updateConnectionUI);
 setTimeout(updateConnectionUI, 1000);
+
+// ===== SYNC AUTOMATIQUE EN ARRIÈRE-PLAN =====
+// Sync toutes les 2 minutes si en ligne et connecté
+setInterval(() => {
+    if (currentUser && navigator.onLine && supabaseClient) {
+        CloudSync.syncDeliveries(currentUser.username).catch(() => {});
+    }
+}, 2 * 60 * 1000);
 
 console.log('✅ Route Note PWA v3 chargé !');

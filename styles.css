@@ -194,6 +194,16 @@ label:has(input[type="radio"]:checked) span {
 }
 
 
+/* Modal déplacement */
+#deliveryFormContainer{display:none;position:fixed;inset:0;z-index:1050;flex-direction:column;justify-content:flex-end}
+#deliveryFormContainer.open{display:flex}
+.modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);animation:fadeInBackdrop .3s ease forwards}
+.modal-sheet{position:relative;border-radius:24px 24px 0 0;padding:8px 16px calc(24px + var(--safe-area-bottom));max-height:88vh;overflow-y:auto;box-shadow:0 -8px 32px rgba(0,0,0,.25);animation:slideUpSheet .35s cubic-bezier(.32,.72,0,1) forwards;background:#fff}
+.modal-sheet .delivery-form{background:none;backdrop-filter:none;box-shadow:none;border:none;padding:0;margin:0}
+.modal-handle{width:36px;height:4px;background:var(--gray-300);border-radius:2px;margin:0 auto 12px}
+@keyframes fadeInBackdrop{from{opacity:0}to{opacity:1}}
+@keyframes slideUpSheet{from{transform:translateY(100%)}to{transform:translateY(0)}}
+
 /* Very small screens */
 @media(max-width:380px){
 .app-title{font-size:20px}

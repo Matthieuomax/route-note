@@ -213,7 +213,10 @@
                 </div>
             </div>
 
-            <div id="deliveryFormContainer" class="hidden">
+            <div id="deliveryFormContainer">
+                <div class="modal-backdrop" onclick="closeDeliveryModal()"></div>
+                <div class="modal-sheet">
+                <div class="modal-handle"></div>
                 <div class="delivery-form">
                     <h2 class="form-title">Nouveau déplacement</h2>
                     <div class="mode-switch">
@@ -285,6 +288,7 @@
                         <button type="button" class="btn btn-secondary" id="cancelAutoBtn">Annuler</button>
                     </div>
                 </div>
+                </div><!-- /modal-sheet -->
             </div>
 
             <div class="deliveries-section">
