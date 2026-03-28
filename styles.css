@@ -186,6 +186,19 @@ label:has(input[type="radio"]:checked) span {
 .theme-pink{background:linear-gradient(135deg,#f472b6,#a855f7)}
 .theme-dark{background:linear-gradient(135deg,#1f2937,#111827)}
 
+/* Modal de bienvenue */
+#welcomeModal{display:none;position:fixed;inset:0;z-index:1060;flex-direction:column;justify-content:flex-end}
+#welcomeModal.open{display:flex}
+.welcome-sheet{max-height:85vh;overflow-y:auto;text-align:center;padding:8px 20px calc(28px + var(--safe-area-bottom))}
+.welcome-icon-wrap{font-size:48px;margin:8px 0 12px}
+.welcome-title{font-size:22px;font-weight:700;margin-bottom:8px;background:linear-gradient(135deg,var(--primary),var(--secondary));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.welcome-intro{font-size:14px;color:var(--gray-500);margin-bottom:20px}
+.welcome-steps{display:flex;flex-direction:column;gap:16px;text-align:left;margin-bottom:20px}
+.welcome-step{display:flex;align-items:flex-start;gap:14px;background:var(--gray-50);padding:14px;border-radius:14px}
+.step-num{font-size:24px;flex-shrink:0;margin-top:2px}
+.welcome-step strong{display:block;font-size:14px;font-weight:700;color:var(--gray-900);margin-bottom:4px}
+.welcome-step p{font-size:13px;color:var(--gray-600);margin:0;line-height:1.5}
+
 /* Auth toggle */
 .auth-toggle{text-align:center;margin-top:16px;font-size:13px;color:var(--gray-500)}
 .auth-toggle a{color:var(--primary);font-weight:600;cursor:pointer;text-decoration:none}

@@ -323,6 +323,43 @@
             <button type="button" class="btn btn-secondary" id="logoutBtn" style="background: linear-gradient(135deg, #fee2e2, #fecaca); color: var(--danger);">Déconnexion</button>
         </div>
 
+        <!-- Modal de bienvenue (affichée une seule fois) -->
+        <div id="welcomeModal">
+            <div class="modal-backdrop" onclick="closeWelcomeModal()"></div>
+            <div class="modal-sheet welcome-sheet">
+                <div class="modal-handle"></div>
+                <div class="welcome-icon-wrap">🚗</div>
+                <h2 class="welcome-title">Bienvenue sur Route Note !</h2>
+                <p class="welcome-intro">Prêt à suivre vos déplacements ? Voici comment démarrer en 3 étapes.</p>
+
+                <div class="welcome-steps">
+                    <div class="welcome-step">
+                        <span class="step-num">⚙️</span>
+                        <div>
+                            <strong>Configurez votre véhicule</strong>
+                            <p>Dans <em>Réglages</em>, choisissez votre véhicule et votre puissance fiscale pour calculer vos indemnités kilométriques.</p>
+                        </div>
+                    </div>
+                    <div class="welcome-step">
+                        <span class="step-num">➕</span>
+                        <div>
+                            <strong>Ajoutez un déplacement</strong>
+                            <p>Appuyez sur <strong>+</strong> en bas à droite. En mode <em>Manuel</em>, saisissez date et kilométrages. En mode <em>Auto</em>, le GPS calcule la distance pour vous.</p>
+                        </div>
+                    </div>
+                    <div class="welcome-step">
+                        <span class="step-num">📊</span>
+                        <div>
+                            <strong>Exportez en Excel</strong>
+                            <p>Dans <em>Réglages</em>, appuyez sur <strong>Exporter</strong> pour télécharger tous vos trajets.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" onclick="closeWelcomeModal()" style="margin-top:8px;">C'est parti ! 🚀</button>
+            </div>
+        </div>
+
         <button class="fab" id="fabBtn" aria-label="Ajouter un déplacement">+</button>
 
         <div class="bottom-nav">

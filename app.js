@@ -476,6 +476,8 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
     try {
         await Auth.register(username, password);
         showSuccess('✅ Compte créé ! Connectez-vous maintenant.');
+        // Marquer pour afficher la bienvenue au prochain login
+        localStorage.removeItem(`welcomeShown_${username}`);
         // Basculer vers le formulaire de connexion
         document.getElementById('registerForm').classList.add('hidden');
         document.getElementById('loginForm').classList.remove('hidden');
@@ -501,6 +503,8 @@ loginForm.addEventListener('submit', async (e) => {
         localStorage.setItem('currentUser', JSON.stringify(user));
         loadUserData();
         showApp();
+
+        if (!localStorage.getItem(`welcomeShown_${username}`)) showWelcomeModal();
 
         CloudSync.fetchFromCloud(username).then(() => {
             deliveries = LocalStorage.getDeliveries(username);
@@ -659,6 +663,15 @@ function openDeliveryModal() {
 }
 function closeDeliveryModal() {
     document.getElementById('deliveryFormContainer').classList.remove('open');
+}
+
+// ===== MODAL DE BIENVENUE =====
+function showWelcomeModal() {
+    document.getElementById('welcomeModal').classList.add('open');
+}
+function closeWelcomeModal() {
+    document.getElementById('welcomeModal').classList.remove('open');
+    if (currentUser) localStorage.setItem(`welcomeShown_${currentUser.username}`, '1');
 }
 
 // ===== FAB =====
@@ -974,15 +987,34 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
     const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
-    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        // Mobile : blob + lien pour déclencher la boîte "Enregistrer dans..."
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const isAndroid = /Android/i.test(navigator.userAgent);
+
+    if (isIOS || isAndroid) {
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
         const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        const file = new File([blob], filename, { type: blob.type });
+
+        if (isIOS && navigator.canShare?.({ files: [file] })) {
+            // iOS 15+ : feuille de partage native → "Enregistrer dans Fichiers"
+            navigator.share({ files: [file], title: filename }).catch(() => {
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+            });
+        } else if (isAndroid) {
+            // Android : lien blob avec attribut download
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } else {
+            // iOS fallback (ancienne version) : ouvre dans Safari → "Ouvrir dans…"
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+        }
     } else {
         XLSX.writeFile(wb, filename);
     }
