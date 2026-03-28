@@ -972,7 +972,20 @@ document.getElementById('btnExportExcel').addEventListener('click', () => {
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Déplacements');
-    XLSX.writeFile(wb, `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    const filename = `Route_Note_${currentUser.username}_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        // Mobile : blob + lien pour déclencher la boîte "Enregistrer dans..."
+        const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } else {
+        XLSX.writeFile(wb, filename);
+    }
     showNotification('✅ Export téléchargé !');
 });
 
@@ -989,24 +1002,6 @@ document.querySelectorAll('.nav-item').forEach(item => {
     });
 });
 
-// ===== INDICATEUR CONNEXION =====
-function updateConnectionUI() {
-    const indicator = document.getElementById('connectionIndicator');
-    const text = document.getElementById('connectionText');
-    if (!indicator || !text) return;
-    if (navigator.onLine) { indicator.className = 'connection-indicator online'; text.textContent = 'En ligne - Sync activée'; }
-    else { indicator.className = 'connection-indicator offline'; text.textContent = 'Hors ligne - Données locales'; }
-}
-
-document.getElementById('btnForceSync')?.addEventListener('click', async function() {
-    this.disabled = true; this.textContent = '🔄 Synchronisation...';
-    try { await forceSync(); } catch (e) { console.error('Erreur sync:', e); }
-    finally { this.disabled = false; this.textContent = '🔄 Synchroniser maintenant'; }
-});
-
-window.addEventListener('online', updateConnectionUI);
-window.addEventListener('offline', updateConnectionUI);
-setTimeout(updateConnectionUI, 1000);
 
 // ===== SYNC AUTOMATIQUE EN ARRIÈRE-PLAN =====
 // Sync toutes les 2 minutes si en ligne et connecté

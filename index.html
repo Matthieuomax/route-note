@@ -19,109 +19,6 @@
     
     <link rel="stylesheet" href="styles.css">
     
-    <style>
-        /* Styles additionnels pour la sync */
-        .sync-badge {
-            display: inline-block;
-            font-size: 10px;
-            margin-left: 6px;
-            animation: pulse 1.5s infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        .delivery-card.unsynced {
-            border-left: 3px solid #f59e0b;
-        }
-        
-        .btn-sync {
-            background: linear-gradient(135deg, #3b82f6, #2563eb);
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 10px;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            width: 100%;
-            justify-content: center;
-            margin-top: 12px;
-        }
-        
-        .btn-sync:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-        }
-        
-        .btn-sync:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-        
-        .connection-indicator {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            padding: 6px 12px;
-            border-radius: 20px;
-            margin-bottom: 12px;
-        }
-        
-        .connection-indicator.online {
-            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
-            color: #065f46;
-        }
-        
-        .connection-indicator.offline {
-            background: linear-gradient(135deg, #fee2e2, #fecaca);
-            color: #991b1b;
-        }
-        
-        .sync-status {
-            font-size: 11px;
-            color: var(--gray-500);
-            text-align: center;
-            margin-top: 8px;
-        }
-        
-        @keyframes slideDown {
-            from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
-            to { transform: translateX(-50%) translateY(0); opacity: 1; }
-        }
-        
-        @keyframes slideUp {
-            from { transform: translateX(-50%) translateY(0); opacity: 1; }
-            to { transform: translateX(-50%) translateY(-20px); opacity: 0; }
-        }
-        
-        /* Style toggle auth */
-        .auth-toggle {
-            text-align: center;
-            margin-top: 16px;
-            font-size: 13px;
-            color: var(--gray-500);
-        }
-        .auth-toggle a {
-            color: var(--primary);
-            font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-        }
-        .auth-toggle a:hover {
-            text-decoration: underline;
-        }
-        .password-hint {
-            font-size: 11px;
-            color: var(--gray-500);
-            margin-top: 4px;
-        }
-    </style>
 </head>
 <body class="theme-blue">
     <div id="authPage" class="auth-container">
@@ -318,17 +215,6 @@
                     <p style="font-size: 13px; font-weight: 600; color: #1e40af;"><span id="settingsUserName"></span></p>
                 </div>
                 
-                <!-- Indicateur de connexion -->
-                <div id="syncSection" style="margin-top: 16px;">
-                    <div id="connectionIndicator" class="connection-indicator online">
-                        <span>📶</span>
-                        <span id="connectionText">En ligne</span>
-                    </div>
-                    <button type="button" class="btn-sync" id="btnForceSync">
-                        🔄 Synchroniser maintenant
-                    </button>
-                    <div class="sync-status" id="syncStatus">Dernière sync : jamais</div>
-                </div>
             </div>
 
             <div class="settings-section">
